@@ -20,11 +20,10 @@ See [Project Review and Plan](docs/PROJECT_REVIEW_AND_PLAN.md) for detailed road
 ## Key Features
 
 ### Core Architecture
-- **LangGraph Orchestration**: State-driven multi-agent workflow with 24 specialized agents
 - **Hierarchical Research Swarm**: 3-tier architecture (Subagents → Domain Synthesizers → Leader) reduces cognitive load by 70%
+- **Central Orchestrator**: Queue-and-worker pattern for parallel experiment execution
 - **Multi-Provider LLM Routing**: Automatic failover across OpenAI, Anthropic, Google, Groq using LangChain's `with_fallbacks()`
 - **Intelligent Feedback Loops**: Three-tier system (Strategy Refinement → Research Refinement → Abandonment)
-- **Parallel Backtesting**: Queue-and-worker pattern for concurrent execution of strategy variants
 
 ### Intelligence Systems
 - **LLM-Powered Failure Analysis**: Classifies failures into 5 categories (Parameter Issue, Algorithm Bug, Design Flaw, Research Gap, Fundamental Impossibility)
@@ -97,35 +96,36 @@ See [Project Review and Plan](docs/PROJECT_REVIEW_AND_PLAN.md) for detailed road
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### LangGraph Workflow Architecture
+### Central Orchestrator Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    LANGGRAPH STATE-DRIVEN WORKFLOW                      │
+│                        CENTRAL ORCHESTRATOR                             │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  Nodes (Agent Invocations):                                             │
-│  • research_swarm: Research Swarm Agent (19 agents)                     │
-│  • strategy_dev: Strategy Development Agent                             │
-│  • parallel_backtest: Async function with queue-and-worker              │
-│  • quality_gate: Quality Gate Agent + sub-agents                        │
-│                                                                         │
-│  State Management (WorkflowState TypedDict):                            │
-│  • Research findings, strategy variants, backtest results               │
+│  State Management:                                                      │
+│  • Current workflow phase                                               │
+│  • Active experiments (parent + child variants)                         │
+│  • Task queue (pending backtests)                                       │
+│  • Worker pool status                                                   │
 │  • Iteration counters (strategy, research, total)                       │
-│  • Failure analysis, trajectory analysis                                │
-│  • Experiment history, best strategy                                    │
+│  • Resource allocation                                                  │
 │                                                                         │
-│  Conditional Routing (Three-Tier Feedback Loops):                       │
-│  • SUCCESS → END                                                        │
-│  • TUNE/FIX/REFINE → strategy_dev (Tier 1)                              │
-│  • RESEARCH → research_swarm (Tier 2)                                   │
-│  • ABANDON → END (Tier 3)                                               │
+│  Routing Logic (Three-Tier Feedback Loops):                             │
+│  • Tier 1: Strategy Refinement                                          │
+│    - TUNE_PARAMETERS: Adjust parameters                                 │
+│    - FIX_BUG: Fix implementation errors                                 │
+│    - REFINE_ALGORITHM: Redesign strategy logic                          │
+│  • Tier 2: Research Refinement                                          │
+│    - REFINE_RESEARCH: Go back to research swarm                         │
+│  • Tier 3: Abandonment Decision                                         │
+│    - ABANDON: Give up on this direction                                 │
 │                                                                         │
-│  Parallel Execution (within parallel_backtest node):                    │
-│  • Task Queue: Backtest jobs for all variants                           │
-│  • Worker Pool: Resource-aware workers                                  │
-│  • Automatic retry for failed tasks                                     │
+│  Parallel Execution (Queue-and-Worker Pattern):                         │
+│  • Task Queue: Pending backtest jobs                                    │
+│  • Worker Pool: N workers (configurable concurrency)                    │
+│  • Resource Check: Run if resources available, else queue               │
+│  • Retry Logic: Failed jobs go back to queue                            │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -185,8 +185,6 @@ All major design decisions are documented in [Decision Log](docs/DECISION_LOG.md
 - **D-019**: Three-Tier Feedback Loop System
 - **D-020**: LLM-Powered Failure Analysis System
 - **D-021**: Experiment Tracking System for Trajectory Analysis
-- **D-022**: Queue-and-Worker Pattern for Parallel Execution
-- **D-023**: LangGraph as Orchestrator (not custom Central Orchestrator)
 
 ## Repository Structure
 
@@ -195,9 +193,6 @@ research_langchain_algotrade_development_system/
 ├── docs/
 │   ├── design/                      # Design documents
 │   │   ├── SYSTEM_DESIGN.md         # Core system design
-│   │   ├── AGENT_CATALOG.md         # Complete catalog of 24 agents
-│   │   ├── LANGGRAPH_IMPLEMENTATION.md # LangGraph implementation guide
-│   │   ├── LANGGRAPH_WORKFLOW_GUIDE.md # LangGraph workflow guide
 │   │   ├── HIERARCHICAL_SYNTHESIS.md # 3-tier synthesis architecture
 │   │   ├── FEEDBACK_LOOPS.md        # Three-tier feedback loops
 │   │   ├── FAILURE_ANALYSIS_SYSTEM.md # LLM-powered failure diagnosis
@@ -218,11 +213,11 @@ research_langchain_algotrade_development_system/
 │   │   ├── error_handler.py         # ✅ Error handling system
 │   │   ├── logging.py               # ✅ Logging configuration
 │   │   └── base_agent.py            # Base agent class
-│   ├── workflows/                   # LangGraph workflows (Phase 9)
-│   │   ├── workflow.py              # Main LangGraph workflow
-│   │   ├── state.py                 # WorkflowState schema
-│   │   ├── task_queue.py            # Task queue for parallel backtests
-│   │   └── worker_pool.py           # Worker pool for parallel execution
+│   ├── orchestrator/                # Central orchestrator (Phase 9)
+│   │   ├── orchestrator.py          # Main orchestrator
+│   │   ├── task_queue.py            # Task queue manager
+│   │   ├── worker_pool.py           # Worker pool manager
+│   │   └── state_manager.py         # State management
 │   ├── memory/                      # Memory system (Phase 2)
 │   │   ├── memory_manager.py        # ChromaDB integration
 │   │   └── lineage_tracker.py       # Lineage tracking
@@ -231,6 +226,7 @@ research_langchain_algotrade_development_system/
 │   │   ├── strategy_dev/            # Strategy development agents
 │   │   └── quality_gate/            # Quality gate agents
 │   ├── tools/                       # Tool registry (Phase 3)
+│   ├── workflows/                   # LangGraph workflows (Phase 9)
 │   └── utils/                       # Utility functions
 ├── tests/
 │   ├── unit/                        # ✅ 31 unit tests passing
@@ -288,52 +284,39 @@ response = llm.invoke("Analyze AAPL stock for momentum patterns")
 ### Full System Usage (After Phase 10)
 
 ```python
-from src.workflows.workflow import create_workflow
-from src.core.llm_client import create_llm_with_fallbacks
+from src.orchestrator import CentralOrchestrator
 
-# Create LLM with failover
-llm = create_llm_with_fallbacks()
+# Initialize orchestrator
+orchestrator = CentralOrchestrator(
+    max_parallel_workers=5,
+    max_strategy_iterations=5,
+    max_research_iterations=3
+)
 
-# Create LangGraph workflow
-workflow = create_workflow(llm)
-app = workflow.compile()
-
-# Define user input
-user_input = {
-    "ticker": "AAPL",
-    "research_directive": "Find momentum alpha in tech stocks",
-    "quality_criteria": {
+# Run workflow
+result = await orchestrator.run_workflow(
+    ticker="AAPL",
+    research_directive="Find momentum alpha in tech stocks",
+    quality_criteria={
         "sharpe_ratio": 1.0,
         "max_drawdown": 0.20,
         "win_rate": 0.50
-    },
-    "timeframe": "1d",
-    "max_strategy_iterations": 5,
-    "max_research_iterations": 3,
-    "max_total_iterations": 15
-}
-
-# Run workflow
-result = app.invoke(user_input)
+    }
+)
 
 # Result contains:
-# - final_status: "SUCCESS" or "ABANDONED"
-# - best_strategy: Strategy code and metrics (if found)
-# - experiment_history: All iterations
-# - total_iterations: Number of iterations
+# - Best strategy (if found)
+# - All experiment records
+# - Lessons learned
+# - Total iterations
 ```
 
 ## Documentation
 
 ### Core Documentation
 - [System Design](docs/design/SYSTEM_DESIGN.md) - Core system architecture
-- [Agent Catalog](docs/design/AGENT_CATALOG.md) - Complete catalog of 24 agents
 - [Project Review and Plan](docs/PROJECT_REVIEW_AND_PLAN.md) - Comprehensive development plan
 - [Decision Log](docs/DECISION_LOG.md) - All design decisions with rationale
-
-### LangGraph Documentation
-- [LangGraph Implementation](docs/design/LANGGRAPH_IMPLEMENTATION.md) - Complete implementation guide
-- [LangGraph Workflow Guide](docs/design/LANGGRAPH_WORKFLOW_GUIDE.md) - Practical workflow guide
 
 ### Architecture Documentation
 - [Hierarchical Synthesis](docs/design/HIERARCHICAL_SYNTHESIS.md) - 3-tier research synthesis
