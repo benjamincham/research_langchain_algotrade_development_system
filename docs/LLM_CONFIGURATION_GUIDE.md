@@ -1,6 +1,6 @@
 # LLM Configuration Guide
 
-This guide explains how to configure multiple LLM providers for the trading research system with seamless failover and no hard-coding.
+This guide explains how to configure multiple LLM providers with automatic failover using **LangChain's built-in `with_fallbacks()` method**.
 
 ## Quick Start
 
@@ -27,137 +27,145 @@ GOOGLE_API_KEY=AIza...
 ### 3. Use in Your Code
 
 ```python
-from src.core.llm_router import RoutedChatModel
+from src.core.llm_client import create_llm_with_fallbacks
 
-# That's it! The system automatically uses available providers
-llm = RoutedChatModel()
+# That's it! Automatic failover is built-in
+llm = create_llm_with_fallbacks()
 
 # Use like any LangChain chat model
 response = llm.invoke("Analyze AAPL stock")
 ```
 
-## Configuration Strategies
+## How It Works
 
-### Strategy 1: Fallback (Recommended for Production)
+### LangChain's Built-in Fallbacks
 
-**Use Case**: Maximum reliability. If one provider fails, automatically try the next.
+LangChain provides the `with_fallbacks()` method on all Runnable objects. This is the **standard, recommended way** to implement failover.
 
-**Configuration**:
+**Example**:
 ```python
-llm = RoutedChatModel(strategy="fallback")
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+
+# Create models
+primary = ChatOpenAI(model="gpt-4o-mini")
+fallback = ChatAnthropic(model="claude-3-5-haiku-20241022")
+
+# Add fallback using LangChain's built-in method
+model = primary.with_fallbacks([fallback])
+
+# Automatic failover on errors
+response = model.invoke("Hello")
 ```
 
 **Behavior**:
-1. Tries highest priority model first (based on `priority` in `ProviderRegistry`)
-2. If it fails (error, timeout, rate limit), tries next model
-3. Continues until success or all models exhausted
+1. Tries `primary` model first
+2. If it fails (rate limit, timeout, error), automatically tries `fallback`
+3. Returns result from whichever succeeds
+4. Raises exception only if all models fail
 
-**Example**:
-```
-Try: gpt-4o-mini (priority 1)
-  ❌ Failed: Rate limit exceeded
-Try: claude-3-5-haiku (priority 1)
-  ✅ Success!
-```
+### Our Factory Functions
 
-**Best For**:
-- Production systems
-- Critical operations
-- When uptime is more important than cost
+We provide convenient factory functions that:
+1. Load credentials from environment variables
+2. Create model instances for available providers
+3. Apply `with_fallbacks()` automatically
 
-### Strategy 2: Cost-Optimized
-
-**Use Case**: Minimize costs by always trying the cheapest model first.
-
-**Configuration**:
 ```python
-llm = RoutedChatModel(strategy="cost_optimized")
-```
-
-**Behavior**:
-1. Tries cheapest model first (based on `input_cost + output_cost`)
-2. Falls back to more expensive models if cheaper ones fail
-
-**Example**:
-```
-Try: gemini-2.0-flash ($0.00)
-  ❌ Failed: Service unavailable
-Try: llama-3.3-70b ($1.38/1M tokens)
-  ✅ Success!
-```
-
-**Best For**:
-- Development/testing
-- High-volume, low-complexity tasks
-- Budget-conscious deployments
-
-### Strategy 3: Dynamic (Runtime Selection)
-
-**Use Case**: Change the model at runtime without code changes.
-
-**Configuration**:
-```python
-llm = RoutedChatModel(strategy="dynamic")
-```
-
-**Behavior**:
-1. Reads `DYNAMIC_LLM_MODEL` environment variable
-2. Uses that model if available
-3. Falls back to other models if specified model fails
-
-**Example**:
-```bash
-# In terminal or deployment config
-export DYNAMIC_LLM_MODEL=claude-3-5-sonnet
-
-# Or in .env
-DYNAMIC_LLM_MODEL=claude-3-5-sonnet
-```
-
-**Best For**:
-- A/B testing different models
-- Switching providers without redeployment
-- Debugging specific provider issues
-
-### Strategy 4: Custom Order
-
-**Use Case**: Explicitly control the order of providers.
-
-**Configuration**:
-```python
-llm = RoutedChatModel(
-    strategy="fallback",
-    custom_model_order=[
-        "gpt-4o-mini",           # Try OpenAI first
-        "claude-3-5-haiku",      # Then Anthropic
-        "gemini-2.0-flash"       # Then Google
-    ]
+from src.core.llm_client import (
+    create_llm_with_fallbacks,  # General purpose
+    create_cheap_llm,            # Cost-optimized
+    create_powerful_llm          # Performance-optimized
 )
 ```
 
+## Configuration Strategies
+
+### Strategy 1: General Purpose (Recommended)
+
+**Use Case**: Balanced reliability and cost.
+
+```python
+llm = create_llm_with_fallbacks()
+```
+
+**Behavior**:
+- Tries providers in order they're configured
+- Automatic failover on errors
+- Works with any available providers
+
 **Best For**:
-- Specific provider preferences
-- Testing provider performance
-- Compliance requirements (e.g., must use specific providers)
+- Production systems
+- General use cases
+- When you want automatic failover
+
+### Strategy 2: Cost-Optimized
+
+**Use Case**: Minimize costs by trying cheapest providers first.
+
+```python
+llm = create_cheap_llm()
+```
+
+**Provider Order** (cheapest first):
+1. Google Gemini (free)
+2. Groq ($0.59-0.79 per 1M tokens)
+3. OpenAI GPT-4o-mini ($0.15-0.60 per 1M tokens)
+4. Anthropic Claude Haiku ($0.80-4.00 per 1M tokens)
+
+**Best For**:
+- Development/testing
+- High-volume, simple tasks
+- Budget-conscious deployments
+
+### Strategy 3: Performance-Optimized
+
+**Use Case**: Maximum capability, tries most powerful models first.
+
+```python
+llm = create_powerful_llm()
+```
+
+**Provider Order** (most capable first):
+1. Anthropic Claude
+2. OpenAI GPT-4
+3. Google Gemini
+4. Groq Llama
+
+**Best For**:
+- Complex reasoning tasks
+- Critical operations
+- When quality matters more than cost
+
+### Strategy 4: Custom Preferred Provider
+
+**Use Case**: Prefer a specific provider but have fallbacks.
+
+```python
+llm = create_llm_with_fallbacks(preferred_provider="anthropic")
+```
+
+**Behavior**:
+- Tries your preferred provider first
+- Falls back to others if it fails
+
+**Best For**:
+- Provider preferences
+- Testing specific providers
+- Compliance requirements
 
 ## Provider-Specific Configuration
 
 ### OpenAI
 
 ```bash
-# Standard configuration
 OPENAI_API_KEY=sk-...
-
-# Optional: Organization ID
-OPENAI_ORG_ID=org-...
-
-# Optional: Custom base URL (for proxies or Azure)
-OPENAI_BASE_URL=https://your-proxy.com/v1
 ```
 
-**Available Models**:
-- `gpt-4o`: Most capable, expensive ($2.50/$10.00 per 1M tokens)
-- `gpt-4o-mini`: Fast, cheap ($0.15/$0.60 per 1M tokens) ⭐ **Recommended**
+**Models Used**:
+- `gpt-4o-mini`: Fast, cheap ($0.15/$0.60 per 1M tokens)
+
+**Get API Key**: https://platform.openai.com/api-keys
 
 ### Anthropic (Claude)
 
@@ -165,9 +173,10 @@ OPENAI_BASE_URL=https://your-proxy.com/v1
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-**Available Models**:
-- `claude-3-5-sonnet`: Most capable ($3.00/$15.00 per 1M tokens)
-- `claude-3-5-haiku`: Fast, cheap ($0.80/$4.00 per 1M tokens) ⭐ **Recommended**
+**Models Used**:
+- `claude-3-5-haiku`: Fast, affordable ($0.80/$4.00 per 1M tokens)
+
+**Get API Key**: https://console.anthropic.com/
 
 ### Google (Gemini)
 
@@ -175,8 +184,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=AIza...
 ```
 
-**Available Models**:
-- `gemini-2.0-flash`: Free tier, 1M token context ⭐ **Best for development**
+**Models Used**:
+- `gemini-2.0-flash-exp`: Free tier, 1M token context
+
+**Get API Key**: https://aistudio.google.com/app/apikey
 
 ### Groq (Fast Inference)
 
@@ -184,30 +195,12 @@ GOOGLE_API_KEY=AIza...
 GROQ_API_KEY=gsk_...
 ```
 
-**Available Models**:
-- `llama-3.3-70b`: Very fast, cheap ($0.59/$0.79 per 1M tokens) ⭐ **Best for high-volume**
+**Models Used**:
+- `llama-3.3-70b-versatile`: Very fast, cheap ($0.59/$0.79 per 1M tokens)
 
-**Note**: Groq is optimized for speed. Great for simple tasks requiring low latency.
+**Get API Key**: https://console.groq.com/
 
-### Azure OpenAI
-
-```bash
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
-```
-
-**Use Case**: Enterprise deployments with Azure compliance requirements.
-
-### AWS Bedrock
-
-```bash
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
-```
-
-**Use Case**: AWS-native deployments, Claude models via Bedrock.
+**Note**: Groq is optimized for speed. Great for simple, high-volume tasks.
 
 ## Recommended Configurations
 
@@ -222,7 +215,7 @@ GROQ_API_KEY=gsk_...          # Very cheap
 ```
 
 ```python
-llm = RoutedChatModel(strategy="cost_optimized")
+llm = create_cheap_llm()
 ```
 
 **Cost**: ~$0.00 - $0.50 per day
@@ -240,15 +233,7 @@ GROQ_API_KEY=gsk_...
 ```
 
 ```python
-llm = RoutedChatModel(
-    strategy="fallback",
-    custom_model_order=[
-        "gpt-4o-mini",
-        "claude-3-5-haiku",
-        "gemini-2.0-flash",
-        "llama-3.3-70b"
-    ]
-)
+llm = create_llm_with_fallbacks()
 ```
 
 **Cost**: ~$5 - $20 per day (depending on volume)
@@ -265,28 +250,26 @@ OPENAI_API_KEY=sk-...         # Emergency fallback
 ```
 
 ```python
-llm = RoutedChatModel(strategy="cost_optimized")
+llm = create_cheap_llm()
 ```
 
 **Cost**: ~$1 - $5 per day
 
-### For Enterprise (Compliance)
+### For Production (Performance)
 
-**Goal**: Use only approved providers (e.g., Azure for data residency).
+**Goal**: Best quality, cost is secondary.
 
 ```bash
 # .env
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
+ANTHROPIC_API_KEY=sk-ant-...  # Primary (most capable)
+OPENAI_API_KEY=sk-...         # Fallback
 ```
 
 ```python
-llm = RoutedChatModel(
-    strategy="fallback",
-    custom_model_order=["azure-gpt-4o"]
-)
+llm = create_powerful_llm()
 ```
+
+**Cost**: ~$10 - $30 per day
 
 ## Failover Behavior
 
@@ -310,21 +293,15 @@ The system automatically fails over when:
    - DNS resolution failure
    - SSL errors
 
-### What Does NOT Trigger Failover?
-
-- **Invalid prompts**: If your prompt is malformed, all models will fail
-- **Content policy violations**: If content is blocked, it's likely blocked everywhere
-- **Insufficient credits**: If you're out of credits, failover won't help
-
 ### Failover Logging
 
-All failover events are logged:
+LangChain logs all failover events:
 
 ```
-INFO: Attempting request with model: gpt-4o-mini
-WARNING: Model gpt-4o-mini failed: Rate limit exceeded
-INFO: Attempting request with model: claude-3-5-haiku
-INFO: Successfully failed over to model: claude-3-5-haiku
+INFO: Configuring LLM with providers: ['openai', 'anthropic', 'google']
+INFO: Primary: openai, Fallbacks: ['anthropic', 'google']
+WARNING: Error in ChatOpenAI: Rate limit exceeded
+INFO: Falling back to ChatAnthropic
 ```
 
 ## Testing Your Configuration
@@ -334,7 +311,7 @@ INFO: Successfully failed over to model: claude-3-5-haiku
 ```python
 # test_llm_config.py
 
-from src.core.llm_router import RoutedChatModel
+from src.core.llm_client import create_llm_with_fallbacks
 from src.config.llm_credentials import get_credentials
 
 # Check available providers
@@ -347,7 +324,7 @@ if not available:
     exit(1)
 
 # Test LLM
-llm = RoutedChatModel(strategy="fallback")
+llm = create_llm_with_fallbacks()
 try:
     response = llm.invoke("Say 'Hello, World!' in one word.")
     print(f"✅ LLM working! Response: {response.content}")
@@ -364,12 +341,58 @@ python test_llm_config.py
 
 ```
 Available providers: ['openai', 'anthropic', 'google']
+INFO: Configuring LLM with providers: ['openai', 'anthropic', 'google']
+INFO: Primary: openai, Fallbacks: ['anthropic', 'google']
 ✅ LLM working! Response: Hello!
+```
+
+## Advanced Usage
+
+### Custom Temperature and Max Tokens
+
+```python
+llm = create_llm_with_fallbacks(
+    temperature=0.3,      # Lower = more deterministic
+    max_tokens=8192       # Longer responses
+)
+```
+
+### Using in Agents
+
+```python
+from src.core.base_agent import BaseAgent
+from src.core.llm_client import create_llm_with_fallbacks
+
+class ResearchAgent(BaseAgent):
+    def __init__(self):
+        llm = create_llm_with_fallbacks()
+        super().__init__(
+            name="ResearchAgent",
+            role="Market Research",
+            llm=llm
+        )
+```
+
+### Manual Fallback Configuration
+
+If you need more control:
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+
+# Create models manually
+primary = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+fallback1 = ChatAnthropic(model="claude-3-5-haiku-20241022")
+fallback2 = ChatOpenAI(model="gpt-3.5-turbo")
+
+# Apply fallbacks manually
+llm = primary.with_fallbacks([fallback1, fallback2])
 ```
 
 ## Troubleshooting
 
-### Problem: "No LLM providers available"
+### Problem: "No LLM providers configured"
 
 **Cause**: No valid API keys in `.env` file.
 
@@ -388,24 +411,15 @@ Available providers: ['openai', 'anthropic', 'google']
 3. Check rate limits on provider dashboards
 4. Add more providers for better redundancy
 
-### Problem: "Model X not found"
-
-**Cause**: Model name is incorrect or not available in your region.
-
-**Solution**:
-1. Check `ProviderRegistry.DEFAULT_MODELS` for correct names
-2. Verify model is available in your account
-3. Update model name in configuration
-
 ### Problem: High costs
 
 **Cause**: Using expensive models or high volume.
 
 **Solution**:
-1. Switch to `cost_optimized` strategy
-2. Use cheaper models (Groq, Gemini)
-3. Add rate limiting to your application
-4. Monitor costs via provider dashboards
+1. Use `create_cheap_llm()` instead
+2. Add free providers (Google Gemini)
+3. Monitor costs via provider dashboards
+4. Implement rate limiting in your application
 
 ## Security Best Practices
 
@@ -441,41 +455,46 @@ Instead of `.env` files, use:
 - **HashiCorp Vault**
 - **Kubernetes Secrets**
 
-Example with AWS Secrets Manager:
-```python
-import boto3
-import json
-
-def get_secrets():
-    client = boto3.client('secretsmanager', region_name='us-east-1')
-    secret = client.get_secret_value(SecretId='trading-system/llm-keys')
-    return json.loads(secret['SecretString'])
-
-# Set environment variables from secrets
-secrets = get_secrets()
-os.environ['OPENAI_API_KEY'] = secrets['openai_api_key']
-```
-
 ## Cost Estimation
 
 ### Per-Agent Costs (Approximate)
 
-| Agent Type | Tokens/Call | Calls/Day | Cost/Day (GPT-4o-mini) | Cost/Day (Groq) |
-|------------|-------------|-----------|------------------------|-----------------|
-| Research Leader | 2000 | 10 | $0.03 | $0.01 |
-| Technical Subagent | 1000 | 50 | $0.08 | $0.03 |
-| Strategy Generator | 3000 | 5 | $0.02 | $0.01 |
-| Quality Gate | 500 | 20 | $0.02 | $0.01 |
+| Agent Type | Tokens/Call | Calls/Day | Cost/Day (GPT-4o-mini) | Cost/Day (Gemini) |
+|------------|-------------|-----------|------------------------|-------------------|
+| Research Leader | 2000 | 10 | $0.03 | $0.00 |
+| Technical Subagent | 1000 | 50 | $0.08 | $0.00 |
+| Strategy Generator | 3000 | 5 | $0.02 | $0.00 |
+| Quality Gate | 500 | 20 | $0.02 | $0.00 |
 
 **Total System Cost/Day**:
 - With GPT-4o-mini: ~$5 - $10
-- With Groq: ~$1 - $3
 - With Gemini: ~$0 (free tier)
+- With Groq: ~$1 - $3
+
+## Why This Approach?
+
+### Advantages of Using LangChain's Built-in Fallbacks
+
+1. **No Reinventing the Wheel**: Uses battle-tested LangChain features
+2. **Simple**: ~100 lines of code vs ~500 for custom solution
+3. **Maintainable**: LangChain team maintains the core logic
+4. **Well-Documented**: Official LangChain documentation
+5. **Community Support**: Large ecosystem and community
+6. **Future-Proof**: Automatic updates with LangChain releases
+
+### What We Add
+
+Our implementation adds:
+- Credential management via environment variables
+- Convenient factory functions for common patterns
+- Provider ordering strategies (cost, performance)
+- Configuration validation
+- Logging and monitoring
 
 ## Next Steps
 
 1. Copy `.env.example` to `.env`
 2. Add your API keys
 3. Run `python test_llm_config.py` to verify
-4. Choose a routing strategy based on your needs
+4. Use `create_llm_with_fallbacks()` in your agents
 5. Monitor costs and adjust as needed
