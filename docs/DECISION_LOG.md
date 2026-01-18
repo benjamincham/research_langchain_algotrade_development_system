@@ -6,6 +6,7 @@ This document tracks all significant design and implementation decisions for the
 
 | ID | Date | Decision | Rationale | Status |
 |----|------|----------|-----------|--------|
+| D-015 | 2026-01-17 | Provider-Agnostic LLM Routing System | Implement a unified LLM interface with automatic failover across multiple providers (OpenAI, Anthropic, Google, Groq, etc.). All credentials managed via environment variables with no hard-coding. Supports fallback, cost-optimized, and dynamic routing strategies for maximum reliability and flexibility. | Approved |
 | D-014 | 2026-01-17 | Removed Regime-Aware Quality Gates Design | Removed the regime-aware quality gates feature as it violates the principle of objective evaluation. Algorithms must prove they can handle various market conditions through their own design, not through lowered quality standards. | Approved |
 | D-013 | 2026-01-17 | Algorithm-Owned Regime Awareness | Quality gates remain objective and universal. Trading algorithms are responsible for their own regime awareness and adaptation. Quality gates evaluate whether the algorithm successfully demonstrates regime-adaptive behavior, not adjust standards based on market conditions. | Approved |
 | D-012 | 2026-01-17 | Regime-Based Dynamic Threshold Adjustment | Adjust quality gate thresholds based on detected market regime to provide context-aware evaluation and reduce false positives/negatives. | Approved |
