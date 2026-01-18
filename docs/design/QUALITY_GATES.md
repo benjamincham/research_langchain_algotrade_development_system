@@ -2,14 +2,30 @@
 
 ## Overview
 
-The Quality Gate System validates trading strategies against user-defined and dynamically evolving criteria. Unlike static boolean pass/fail gates, this system uses fuzzy logic scoring with confidence intervals and adaptive thresholds.
+The Quality Gate System validates trading strategies against user-defined criteria. Unlike static boolean pass/fail gates, this system uses fuzzy logic scoring with confidence intervals.
+
+## Philosophy: Objective Evaluation
+
+**Core Principle**: Quality gates remain **objective and universal**. They do not adjust thresholds based on market regimes or conditions.
+
+**Rationale**:
+- Trading algorithms are responsible for their own regime awareness and adaptation
+- Quality gates evaluate whether the algorithm successfully demonstrates regime-adaptive behavior
+- Algorithms should prove they can handle different market conditions through their design (e.g., regime-switching strategies, adaptive parameters)
+- No "lowering of standards" in tough markets - algorithms must demonstrate robustness
+
+**Example**:
+- A good algorithm shows consistent performance across bull/bear/sideways markets
+- Quality gates measure this consistency objectively
+- The algorithm's internal logic handles regime detection and adaptation
+- Quality gates verify the algorithm's adaptive capability, not excuse poor performance
 
 ## Key Features
 
 1. **User-Defined Criteria**: Initial criteria set by human at project start
 2. **Fuzzy Logic Scoring**: Continuous 0-1 scores instead of boolean pass/fail
 3. **Statistical Significance**: Confidence intervals for all metrics
-4. **Adaptive Thresholds**: Criteria can evolve based on market conditions
+4. **Objective Standards**: Thresholds remain constant across all market conditions
 5. **Detailed Feedback**: Actionable improvement suggestions for failures
 
 ## Architecture

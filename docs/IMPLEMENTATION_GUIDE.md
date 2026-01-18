@@ -1,17 +1,12 @@
-# Implementation Guide: Hierarchical Synthesis & Regime-Aware Quality Gates
+# Implementation Guide: Hierarchical Synthesis
 
-This guide provides a practical roadmap for implementing the two major design improvements identified in the design critique.
+This guide provides a practical roadmap for implementing the Hierarchical Synthesis design improvement identified in the design critique.
 
 ## Overview
 
-Both solutions address critical weaknesses in the current design:
-
-1. **Hierarchical Synthesis**: Prevents the Leader Agent from becoming a synthesis bottleneck by introducing Domain Synthesizers
-2. **Regime-Aware Quality Gates**: Makes quality evaluation context-aware by adjusting thresholds based on market conditions
+The Hierarchical Synthesis solution addresses the critical weakness of synthesis bottleneck in the Research Swarm by introducing Domain Synthesizers as an intermediate processing layer between specialized subagents and the Leader Agent.
 
 ## Implementation Priority
-
-These features should be implemented in the following order:
 
 ### Phase 1: Core Infrastructure (Already Started)
 - ✅ Basic agent framework
@@ -19,15 +14,14 @@ These features should be implemented in the following order:
 - ✅ Memory manager
 - ⏳ Tool registry
 
-### Phase 2: Enhanced Memory for Regime Tracking
-**Before implementing either feature, enhance the memory system:**
+### Phase 2: Enhanced Memory for Fact Sheets
+**Before implementing Hierarchical Synthesis, enhance the memory system:**
 
-1. Add `RegimeCharacteristics` schema to memory
-2. Implement `RegimeDetector` as a standalone utility
-3. Populate historical regime data for backtesting periods
-4. Add `FactSheet` schema to memory
+1. Add `FactSheet` schema to memory
+2. Add `KeyInsight` schema to memory
+3. Update memory manager to store and retrieve Fact Sheets
 
-**Estimated Effort**: 2-3 days
+**Estimated Effort**: 1-2 days
 
 ### Phase 3: Hierarchical Synthesis Implementation
 **Implement in this order:**
@@ -60,36 +54,6 @@ These features should be implemented in the following order:
 
 **Total Estimated Effort**: 6 days
 
-### Phase 4: Regime-Aware Quality Gates Implementation
-**Implement in this order:**
-
-1. **Regime Detection** (2 days)
-   - Implement `RegimeDetector`
-   - Add trend and volatility calculations
-   - Test on historical data
-
-2. **Threshold Adjustment** (1 day)
-   - Implement `ThresholdAdjuster`
-   - Define `REGIME_ADJUSTMENTS` table
-   - Add adjustment logic
-
-3. **Enhanced Fuzzy Evaluator** (1 day)
-   - Update `FuzzyEvaluator` to accept regime
-   - Add regime-normalized scoring
-   - Update tests
-
-4. **Benchmark Comparator** (1 day)
-   - Implement `BenchmarkComparator`
-   - Add percentile calculations
-   - Add relative performance logic
-
-5. **Integration** (1 day)
-   - Update Quality Gate workflow
-   - Add regime detection step
-   - End-to-end testing
-
-**Total Estimated Effort**: 6 days
-
 ## Detailed Implementation Steps
 
 ### Step 1: Enhance Memory Schema
@@ -97,30 +61,37 @@ These features should be implemented in the following order:
 ```python
 # Add to src/memory/schemas.py
 
-class RegimeCharacteristics(BaseModel):
-    regime: MarketRegime
-    trend_direction: float
-    trend_strength: float
-    volatility: float
-    volatility_percentile: float
-    correlation_regime: float
-    liquidity_score: float
-    start_date: date
-    end_date: Optional[date]
-    historical_sharpe: float
-    historical_drawdown: float
+class KeyInsight(BaseModel):
+    """A single key insight from domain synthesis."""
+    
+    insight: str  # Natural language
+    insight_type: Literal["bullish", "bearish", "neutral", "conditional"]
+    confidence: float
+    supporting_findings: list[str]  # Finding IDs
+    conditions: Optional[list[str]]  # Conditions for conditional insights
 
 class FactSheet(BaseModel):
+    """Standardized output from Domain Synthesizers."""
+    
+    # Identification
     domain: str
     timestamp: datetime
     synthesizer_id: str
-    key_insights: list[KeyInsight]
-    recommendation: str
-    confidence: float
-    evidence_strength: float
+    
+    # Core Content
+    key_insights: list[KeyInsight]  # Top 3-5 insights
+    recommendation: str  # Domain-specific recommendation
+    
+    # Confidence and Quality
+    confidence: float  # Aggregate confidence
+    evidence_strength: float  # 0.0 to 1.0
     conflicts_resolved: int
+    
+    # Supporting Data
     supporting_findings: list[SubagentFinding]
     evidence_count: int
+    
+    # Metadata
     subagents_used: list[str]
     execution_time: float
 ```
@@ -187,65 +158,74 @@ class DomainSynthesizer(BaseAgent):
         pass
 ```
 
-### Step 3: Implement Regime Detector
+### Step 3: Implement Conflict Resolver
 
 ```python
-# Create src/quality_gates/regime_detector.py
+# Create src/agents/research/conflict_resolver.py
 
-import pandas as pd
-import numpy as np
-from src.memory.memory_manager import get_memory_manager
-
-class RegimeDetector:
-    """Detects and classifies market regimes."""
+class IntraDomainConflictResolver:
+    """Resolves conflicts within a single domain."""
     
-    def __init__(self, lookback_days: int = 252):
-        self.lookback_days = lookback_days
-        self.memory = get_memory_manager()
-    
-    async def detect_current_regime(
+    async def resolve(
         self, 
-        market_data: pd.DataFrame,
-        asset_class: str = "equities"
-    ) -> RegimeCharacteristics:
-        """Detect current market regime."""
+        grouped_findings: dict[str, list[SubagentFinding]]
+    ) -> list[SubagentFinding]:
+        """
+        Resolve conflicts within grouped findings.
         
-        # Calculate trend
-        trend_direction, trend_strength = self._calculate_trend(market_data)
+        Strategy:
+        1. For each group, check for contradictions
+        2. If contradictions exist:
+           a. Compare confidence scores
+           b. Compare evidence strength
+           c. Check temporal relevance
+           d. Apply weighted voting
+        3. Keep highest-confidence finding or create merged finding
+        """
+        resolved = []
         
-        # Calculate volatility
-        volatility = self._calculate_volatility(market_data)
-        volatility_percentile = self._calculate_volatility_percentile(
-            volatility, 
-            market_data
-        )
+        for topic, findings in grouped_findings.items():
+            if self._has_contradiction(findings):
+                # Resolve using weighted confidence
+                resolved_finding = self._weighted_resolution(findings)
+                resolved.append(resolved_finding)
+            else:
+                # No conflict, merge complementary findings
+                merged = self._merge_complementary(findings)
+                resolved.append(merged)
         
-        # Classify regime
-        regime = self._classify_regime(
-            trend_direction, 
-            trend_strength, 
-            volatility_percentile
-        )
+        return resolved
+    
+    def _weighted_resolution(
+        self, 
+        findings: list[SubagentFinding]
+    ) -> SubagentFinding:
+        """Resolve contradictory findings using weighted voting."""
+        # Calculate weights based on confidence and evidence
+        weights = []
+        for f in findings:
+            weight = f.confidence * (1 + len(f.evidence) * 0.1)
+            weights.append(weight)
         
-        # Get historical characteristics
-        historical_data = await self._get_historical_regime_data(
-            regime, 
-            asset_class
-        )
+        # Normalize weights
+        total_weight = sum(weights)
+        normalized_weights = [w / total_weight for w in weights]
         
-        return RegimeCharacteristics(
-            regime=regime,
-            trend_direction=trend_direction,
-            trend_strength=trend_strength,
-            volatility=volatility,
-            volatility_percentile=volatility_percentile,
-            correlation_regime=self._calculate_correlation(market_data),
-            liquidity_score=self._calculate_liquidity(market_data),
-            start_date=market_data.index[-self.lookback_days],
-            end_date=market_data.index[-1],
-            historical_sharpe=historical_data['avg_sharpe'],
-            historical_drawdown=historical_data['avg_drawdown']
-        )
+        # Select finding with highest weight
+        max_idx = normalized_weights.index(max(normalized_weights))
+        winner = findings[max_idx]
+        
+        # Adjust confidence based on disagreement
+        disagreement_penalty = 1 - (max(normalized_weights) - min(normalized_weights))
+        winner.confidence *= disagreement_penalty
+        
+        # Add metadata about resolution
+        winner.metadata = {
+            "resolved_from": [f.subagent_id for f in findings],
+            "disagreement_level": 1 - disagreement_penalty
+        }
+        
+        return winner
 ```
 
 ### Step 4: Update Research Swarm Workflow
@@ -304,43 +284,6 @@ async def execute_hierarchical_research(
     return final_synthesis
 ```
 
-### Step 5: Update Quality Gate Evaluation
-
-```python
-# Update src/quality_gates/evaluator.py
-
-async def evaluate_strategy_with_regime_awareness(
-    strategy: Strategy,
-    backtest_results: dict,
-    user_config: UserConfiguration
-) -> RegimeAwareGateResult:
-    """Evaluate strategy with regime awareness."""
-    
-    # Detect regime
-    regime_detector = RegimeDetector()
-    regime = await regime_detector.detect_current_regime(
-        market_data=backtest_results['benchmark_data'],
-        asset_class=strategy.asset_class
-    )
-    
-    # Adjust thresholds
-    threshold_adjuster = ThresholdAdjuster()
-    adjusted_criteria = threshold_adjuster.adjust_thresholds(
-        user_config.quality_criteria,
-        regime
-    )
-    
-    # Evaluate with adjusted thresholds
-    evaluator = RegimeAwareFuzzyEvaluator(threshold_adjuster)
-    gate_result = await evaluator.evaluate_with_regime(
-        strategy_metrics=backtest_results['metrics'],
-        base_criteria=user_config.quality_criteria,
-        regime=regime
-    )
-    
-    return gate_result
-```
-
 ## Testing Strategy
 
 ### Unit Tests
@@ -350,21 +293,20 @@ async def evaluate_strategy_with_regime_awareness(
 
 ### Integration Tests
 - Test Tier 1 → Tier 2 → Tier 3 flow
-- Test regime detection with historical data
-- Test threshold adjustment logic
+- Test conflict resolution with various scenarios
+- Verify memory persistence
 
 ### End-to-End Tests
 - Full research swarm execution
-- Full quality gate evaluation
-- Verify memory persistence
+- Verify synthesis quality
+- Performance benchmarks
 
 ## Rollout Plan
 
-1. **Week 1-2**: Implement Hierarchical Synthesis
-2. **Week 3**: Test and debug Hierarchical Synthesis
-3. **Week 4-5**: Implement Regime-Aware Quality Gates
-4. **Week 6**: Integration testing and documentation
-5. **Week 7**: User acceptance testing
+1. **Week 1**: Implement Domain Synthesizer base class and schemas
+2. **Week 2**: Implement conflict resolution and domain-specific synthesizers
+3. **Week 3**: Update Leader Agent and integrate workflow
+4. **Week 4**: Testing and documentation
 
 ## Success Metrics
 
@@ -372,16 +314,13 @@ async def evaluate_strategy_with_regime_awareness(
 - Leader synthesis time reduced by 50%
 - Synthesis accuracy improved (measured by human review)
 - Reduced "hallucination" rate in synthesis
-
-### Regime-Aware Quality Gates
-- False negative rate reduced by 30%
-- False positive rate reduced by 30%
-- User satisfaction with quality gate feedback improved
+- Scales to 15-20 subagents (vs 5-6 before)
+- Context window usage reduced by 50%
 
 ## Next Steps
 
 1. Review this implementation guide
 2. Set up development environment
 3. Begin with Phase 2: Enhanced Memory
-4. Proceed through phases sequentially
+4. Proceed through Phase 3 sequentially
 5. Document learnings in DECISION_LOG.md
