@@ -1,627 +1,666 @@
-# Agent Monitoring & Evaluation Framework
+# Agent Monitoring with LangFuse
 
 ## Overview
 
-This document defines a comprehensive monitoring and evaluation framework for all 23 agents in the system. The framework enables performance tracking, health monitoring, explainability, and continuous improvement.
+This document defines the monitoring and observability framework for all 23 agents in the system using **LangFuse**, an open-source LLM engineering platform specifically designed for tracing and monitoring LangChain/LangGraph applications.
 
-## Goals
+## Why LangFuse?
 
-1. **Performance Tracking**: Measure which agents provide valuable insights
-2. **Health Monitoring**: Detect degraded or failing agents
-3. **Explainability**: Understand why agents made specific decisions
-4. **Continuous Improvement**: Identify opportunities for agent optimization
-5. **Resource Optimization**: Track compute costs and optimize agent usage
+**LangFuse is the perfect fit** for our agentic system because:
+
+1. **Native LangChain Integration**: Automatic tracing via `CallbackHandler`
+2. **Zero Instrumentation Overhead**: No manual logging code required
+3. **Hierarchical Traces**: Automatically captures nested agent calls
+4. **Cost Tracking**: Automatic token counting and cost calculation
+5. **Prompt Management**: Version control for prompts
+6. **User Feedback**: Built-in annotation and scoring
+7. **Production-Ready**: Dashboard, alerting, and analytics included
+8. **Open Source**: Self-hostable, no vendor lock-in
 
 ## Architecture
 
-### 4-Layer Monitoring Stack
+### LangFuse Integration Stack
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 4: Visualization & Alerting                          │
-│  - Grafana dashboards                                       │
-│  - Alert manager                                            │
-│  - Explainability UI                                        │
+│  LangFuse Dashboard (Web UI)                                │
+│  - Trace visualization                                      │
+│  - Cost analytics                                           │
+│  - Performance metrics                                      │
+│  - User feedback                                            │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 3: Analytics & Aggregation                           │
-│  - Agent performance analyzer                               │
-│  - Trend detection                                          │
-│  - Anomaly detection                                        │
+│  LangFuse API (Cloud or Self-Hosted)                        │
+│  - Trace ingestion                                          │
+│  - Metrics aggregation                                      │
+│  - Data storage                                             │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 2: Metrics Collection & Storage                      │
-│  - Metrics collector                                        │
-│  - Time-series database (Prometheus)                        │
-│  - Event log storage                                        │
+│  LangFuse CallbackHandler (Python SDK)                      │
+│  - Automatic trace capture                                  │
+│  - Token counting                                           │
+│  - Cost calculation                                         │
+│  - Metadata attachment                                      │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 1: Agent Instrumentation                             │
-│  - Decorators for automatic metric collection               │
-│  - Context managers for timing                              │
-│  - Logging integration                                      │
+│  LangGraph Workflow                                         │
+│  - Research Swarm Agent                                     │
+│  - Strategy Development Agent                               │
+│  - Quality Gate Agent                                       │
+│  - All 23 agents automatically traced                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Metrics Schema
+## Setup
 
-### Agent Performance Metrics
+### 1. Installation
 
-```python
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
-from datetime import datetime
-
-class AgentInvocationMetrics(BaseModel):
-    """Metrics for a single agent invocation"""
-    agent_id: str
-    agent_type: str  # "research_subagent", "synthesizer", "quality_gate", etc.
-    invocation_id: str
-    timestamp: datetime
-    
-    # Performance metrics
-    duration_ms: float
-    token_count: int
-    cost_usd: float
-    
-    # Quality metrics
-    success: bool
-    error_type: Optional[str] = None
-    error_message: Optional[str] = None
-    
-    # Output metrics
-    output_length: int
-    confidence_score: Optional[float] = Field(None, ge=0.0, le=1.0)
-    
-    # Context
-    workflow_id: str
-    iteration_number: int
-    ticker: str
-
-class AgentAggregateMetrics(BaseModel):
-    """Aggregate metrics for an agent over time"""
-    agent_id: str
-    agent_type: str
-    time_window: str  # "1h", "24h", "7d", "30d"
-    
-    # Invocation stats
-    total_invocations: int
-    successful_invocations: int
-    failed_invocations: int
-    success_rate: float = Field(..., ge=0.0, le=1.0)
-    
-    # Performance stats
-    avg_duration_ms: float
-    p50_duration_ms: float
-    p95_duration_ms: float
-    p99_duration_ms: float
-    
-    # Cost stats
-    total_cost_usd: float
-    avg_cost_per_invocation: float
-    
-    # Quality stats
-    avg_confidence_score: Optional[float] = None
-    insight_quality_score: Optional[float] = None  # From downstream success
-    
-    # Health status
-    health_status: str  # "healthy", "degraded", "failing"
-    last_success_timestamp: datetime
-    last_failure_timestamp: Optional[datetime] = None
-
-class AgentInsightQuality(BaseModel):
-    """Measures quality of agent insights"""
-    agent_id: str
-    finding_id: str
-    
-    # Downstream impact
-    used_in_strategy: bool
-    strategy_passed_quality_gate: bool
-    strategy_sharpe_ratio: Optional[float] = None
-    
-    # Human feedback (optional)
-    human_rating: Optional[int] = Field(None, ge=1, le=5)
-    human_feedback: Optional[str] = None
-    
-    # Calculated quality score
-    quality_score: float = Field(..., ge=0.0, le=1.0)
+```bash
+pip install langfuse langchain langchain-openai
 ```
 
-## Implementation
+### 2. Environment Configuration
 
-### Layer 1: Agent Instrumentation
+Add to `.env`:
 
-```python
-import time
-import functools
-from contextlib import contextmanager
-from typing import Callable, Any
+```bash
+# LangFuse Configuration
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com  # Or self-hosted URL
 
-class AgentMonitor:
-    """Singleton for collecting agent metrics"""
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.metrics_buffer = []
-        return cls._instance
-    
-    def log_invocation(self, metrics: AgentInvocationMetrics):
-        """Log a single agent invocation"""
-        self.metrics_buffer.append(metrics)
-        
-        # Flush to storage if buffer is full
-        if len(self.metrics_buffer) >= 100:
-            self.flush()
-    
-    def flush(self):
-        """Flush metrics to storage"""
-        # Write to time-series database
-        # Write to event log
-        self.metrics_buffer.clear()
-
-def monitor_agent(agent_id: str, agent_type: str):
-    """Decorator to automatically monitor agent invocations"""
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
-            monitor = AgentMonitor()
-            invocation_id = generate_invocation_id()
-            start_time = time.time()
-            
-            try:
-                result = await func(*args, **kwargs)
-                duration_ms = (time.time() - start_time) * 1000
-                
-                # Extract metrics from result
-                metrics = AgentInvocationMetrics(
-                    agent_id=agent_id,
-                    agent_type=agent_type,
-                    invocation_id=invocation_id,
-                    timestamp=datetime.now(),
-                    duration_ms=duration_ms,
-                    token_count=estimate_tokens(result),
-                    cost_usd=calculate_cost(result),
-                    success=True,
-                    output_length=len(str(result)),
-                    confidence_score=extract_confidence(result),
-                    workflow_id=kwargs.get("workflow_id"),
-                    iteration_number=kwargs.get("iteration_number"),
-                    ticker=kwargs.get("ticker")
-                )
-                
-                monitor.log_invocation(metrics)
-                return result
-                
-            except Exception as e:
-                duration_ms = (time.time() - start_time) * 1000
-                
-                metrics = AgentInvocationMetrics(
-                    agent_id=agent_id,
-                    agent_type=agent_type,
-                    invocation_id=invocation_id,
-                    timestamp=datetime.now(),
-                    duration_ms=duration_ms,
-                    token_count=0,
-                    cost_usd=0.0,
-                    success=False,
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                    output_length=0,
-                    workflow_id=kwargs.get("workflow_id"),
-                    iteration_number=kwargs.get("iteration_number"),
-                    ticker=kwargs.get("ticker")
-                )
-                
-                monitor.log_invocation(metrics)
-                raise
-        
-        return wrapper
-    return decorator
-
-# Usage example
-@monitor_agent(agent_id="price_action_analyst", agent_type="research_subagent")
-async def price_action_analyst(ticker: str, workflow_id: str, iteration_number: int):
-    # Agent logic here
-    findings = analyze_price_action(ticker)
-    return findings
+# OpenAI Configuration (already have)
+OPENAI_API_KEY=sk-...
 ```
 
-### Layer 2: Metrics Collection & Storage
+### 3. Initialize LangFuse Handler
 
 ```python
-from prometheus_client import Counter, Histogram, Gauge
-import json
+from langfuse.langchain import CallbackHandler
 
-# Prometheus metrics
-agent_invocations_total = Counter(
-    'agent_invocations_total',
-    'Total number of agent invocations',
-    ['agent_id', 'agent_type', 'status']
+# Initialize once, use everywhere
+langfuse_handler = CallbackHandler(
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    host=os.getenv("LANGFUSE_BASE_URL")
 )
-
-agent_duration_seconds = Histogram(
-    'agent_duration_seconds',
-    'Agent invocation duration in seconds',
-    ['agent_id', 'agent_type']
-)
-
-agent_cost_usd = Counter(
-    'agent_cost_usd_total',
-    'Total cost of agent invocations in USD',
-    ['agent_id', 'agent_type']
-)
-
-agent_health_status = Gauge(
-    'agent_health_status',
-    'Agent health status (1=healthy, 0.5=degraded, 0=failing)',
-    ['agent_id', 'agent_type']
-)
-
-class MetricsCollector:
-    """Collects and stores agent metrics"""
-    
-    def __init__(self, storage_path: str = "metrics/"):
-        self.storage_path = storage_path
-    
-    def record_invocation(self, metrics: AgentInvocationMetrics):
-        """Record metrics to Prometheus and event log"""
-        # Update Prometheus metrics
-        status = "success" if metrics.success else "failure"
-        agent_invocations_total.labels(
-            agent_id=metrics.agent_id,
-            agent_type=metrics.agent_type,
-            status=status
-        ).inc()
-        
-        agent_duration_seconds.labels(
-            agent_id=metrics.agent_id,
-            agent_type=metrics.agent_type
-        ).observe(metrics.duration_ms / 1000)
-        
-        agent_cost_usd.labels(
-            agent_id=metrics.agent_id,
-            agent_type=metrics.agent_type
-        ).inc(metrics.cost_usd)
-        
-        # Write to event log (JSONL)
-        log_file = f"{self.storage_path}/agent_events.jsonl"
-        with open(log_file, "a") as f:
-            f.write(metrics.model_dump_json() + "\n")
-    
-    def get_aggregate_metrics(
-        self, 
-        agent_id: str, 
-        time_window: str = "24h"
-    ) -> AgentAggregateMetrics:
-        """Calculate aggregate metrics for an agent"""
-        # Query Prometheus for aggregate data
-        # Or read from event log and calculate
-        pass
 ```
 
-### Layer 3: Analytics & Aggregation
+## Integration with LangGraph
+
+### Automatic Tracing for Entire Workflow
 
 ```python
-class AgentPerformanceAnalyzer:
-    """Analyzes agent performance and detects issues"""
-    
-    def analyze_agent_health(self, agent_id: str) -> str:
-        """Determine agent health status"""
-        metrics = self.get_recent_metrics(agent_id, window="1h")
-        
-        # Check success rate
-        if metrics.success_rate < 0.5:
-            return "failing"
-        elif metrics.success_rate < 0.9:
-            return "degraded"
-        
-        # Check latency
-        if metrics.p95_duration_ms > 30000:  # 30 seconds
-            return "degraded"
-        
-        # Check cost anomalies
-        if metrics.avg_cost_per_invocation > self.get_baseline_cost(agent_id) * 2:
-            return "degraded"
-        
-        return "healthy"
-    
-    def detect_performance_regression(self, agent_id: str) -> bool:
-        """Detect if agent performance is degrading over time"""
-        current_metrics = self.get_recent_metrics(agent_id, window="24h")
-        baseline_metrics = self.get_baseline_metrics(agent_id)
-        
-        # Compare duration
-        if current_metrics.avg_duration_ms > baseline_metrics.avg_duration_ms * 1.5:
-            return True
-        
-        # Compare success rate
-        if current_metrics.success_rate < baseline_metrics.success_rate * 0.9:
-            return True
-        
-        return False
-    
-    def rank_agents_by_insight_quality(self) -> List[tuple]:
-        """Rank agents by quality of insights"""
-        agent_scores = {}
-        
-        for agent_id in self.get_all_agent_ids():
-            insights = self.get_agent_insights(agent_id)
-            quality_scores = [i.quality_score for i in insights]
-            avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
-            agent_scores[agent_id] = avg_quality
-        
-        return sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)
-    
-    def calculate_insight_quality_score(
-        self, 
-        finding_id: str,
-        strategy_result: Optional[BacktestMetrics] = None
-    ) -> float:
-        """Calculate quality score for an agent insight"""
-        score = 0.0
-        
-        # Was the finding used in a strategy?
-        if strategy_result is not None:
-            score += 0.3
-            
-            # Did the strategy pass quality gates?
-            if strategy_result.passed_quality_gate:
-                score += 0.3
-                
-                # How good was the strategy?
-                if strategy_result.sharpe_ratio > 1.5:
-                    score += 0.4
-                elif strategy_result.sharpe_ratio > 1.0:
-                    score += 0.2
-        
-        return min(score, 1.0)
-```
+from langgraph.graph import StateGraph
+from langfuse.langchain import CallbackHandler
 
-### Layer 4: Visualization & Alerting
-
-```python
-class AlertManager:
-    """Manages alerts for agent health issues"""
+def create_monitored_graph():
+    """Create LangGraph with LangFuse monitoring"""
     
-    def check_and_alert(self):
-        """Check all agents and send alerts if needed"""
-        analyzer = AgentPerformanceAnalyzer()
-        
-        for agent_id in self.get_all_agent_ids():
-            health = analyzer.analyze_agent_health(agent_id)
-            
-            if health == "failing":
-                self.send_alert(
-                    severity="critical",
-                    message=f"Agent {agent_id} is FAILING (success rate < 50%)",
-                    agent_id=agent_id
-                )
-            elif health == "degraded":
-                self.send_alert(
-                    severity="warning",
-                    message=f"Agent {agent_id} is DEGRADED (success rate < 90% or high latency)",
-                    agent_id=agent_id
-                )
-            
-            # Check for performance regression
-            if analyzer.detect_performance_regression(agent_id):
-                self.send_alert(
-                    severity="warning",
-                    message=f"Agent {agent_id} performance has regressed",
-                    agent_id=agent_id
-                )
+    # Initialize LangFuse handler
+    langfuse_handler = CallbackHandler()
     
-    def send_alert(self, severity: str, message: str, agent_id: str):
-        """Send alert via configured channels"""
-        # Send to Slack, email, PagerDuty, etc.
-        logger.warning(f"[{severity.upper()}] {message}")
-```
-
-## Explainability
-
-### Decision Logging
-
-```python
-class AgentDecisionLogger:
-    """Logs agent decisions for explainability"""
+    # Create graph
+    graph = StateGraph(WorkflowState)
     
-    def log_decision(
-        self,
-        agent_id: str,
-        decision: str,
-        reasoning: str,
-        evidence: Dict[str, Any],
-        alternatives_considered: List[str]
-    ):
-        """Log an agent decision with full context"""
-        decision_log = {
-            "agent_id": agent_id,
-            "timestamp": datetime.now().isoformat(),
-            "decision": decision,
-            "reasoning": reasoning,
-            "evidence": evidence,
-            "alternatives_considered": alternatives_considered
+    # Add nodes (no instrumentation needed!)
+    graph.add_node("research_swarm", research_swarm_node)
+    graph.add_node("strategy_dev", strategy_dev_node)
+    graph.add_node("parallel_backtest", parallel_backtest_node)
+    graph.add_node("quality_gate", quality_gate_node)
+    
+    # Add edges
+    graph.add_edge(START, "research_swarm")
+    graph.add_edge("research_swarm", "strategy_dev")
+    graph.add_edge("strategy_dev", "parallel_backtest")
+    graph.add_edge("parallel_backtest", "quality_gate")
+    graph.add_conditional_edges(
+        "quality_gate",
+        route_after_quality_gate,
+        {
+            "success": END,
+            "tune": "strategy_dev",
+            "research": "research_swarm",
+            "abandon": END
         }
-        
-        # Store in database for later retrieval
-        self.store_decision(decision_log)
-    
-    def explain_decision(self, decision_id: str) -> str:
-        """Generate human-readable explanation of a decision"""
-        decision = self.get_decision(decision_id)
-        
-        explanation = f"""
-        Agent: {decision['agent_id']}
-        Decision: {decision['decision']}
-        
-        Reasoning:
-        {decision['reasoning']}
-        
-        Evidence:
-        {json.dumps(decision['evidence'], indent=2)}
-        
-        Alternatives Considered:
-        {', '.join(decision['alternatives_considered'])}
-        """
-        
-        return explanation
-```
-
-## A/B Testing Framework
-
-```python
-class AgentABTest:
-    """Framework for A/B testing agent implementations"""
-    
-    def __init__(
-        self,
-        agent_id: str,
-        variant_a: Callable,
-        variant_b: Callable,
-        traffic_split: float = 0.5
-    ):
-        self.agent_id = agent_id
-        self.variant_a = variant_a
-        self.variant_b = variant_b
-        self.traffic_split = traffic_split
-    
-    async def invoke(self, *args, **kwargs):
-        """Invoke agent with A/B testing"""
-        import random
-        
-        # Randomly assign to variant
-        use_variant_a = random.random() < self.traffic_split
-        variant = "A" if use_variant_a else "B"
-        
-        # Track which variant was used
-        kwargs["ab_test_variant"] = variant
-        
-        # Invoke appropriate variant
-        if use_variant_a:
-            result = await self.variant_a(*args, **kwargs)
-        else:
-            result = await self.variant_b(*args, **kwargs)
-        
-        # Log result with variant info
-        self.log_ab_test_result(variant, result, *args, **kwargs)
-        
-        return result
-    
-    def get_ab_test_results(self) -> Dict[str, AgentAggregateMetrics]:
-        """Get results for both variants"""
-        return {
-            "variant_a": self.get_variant_metrics("A"),
-            "variant_b": self.get_variant_metrics("B")
-        }
-    
-    def determine_winner(self) -> str:
-        """Determine which variant performs better"""
-        results = self.get_ab_test_results()
-        
-        # Compare success rates
-        if results["variant_a"].success_rate > results["variant_b"].success_rate:
-            return "A"
-        elif results["variant_b"].success_rate > results["variant_a"].success_rate:
-            return "B"
-        
-        # Compare insight quality
-        if results["variant_a"].insight_quality_score > results["variant_b"].insight_quality_score:
-            return "A"
-        else:
-            return "B"
-```
-
-## Integration with Existing System
-
-### Update Agent Implementations
-
-```python
-# Before: No monitoring
-async def price_action_analyst(ticker: str):
-    findings = analyze_price_action(ticker)
-    return findings
-
-# After: With monitoring
-@monitor_agent(agent_id="price_action_analyst", agent_type="research_subagent")
-async def price_action_analyst(ticker: str, workflow_id: str, iteration_number: int):
-    findings = analyze_price_action(ticker)
-    
-    # Log decision for explainability
-    decision_logger = AgentDecisionLogger()
-    decision_logger.log_decision(
-        agent_id="price_action_analyst",
-        decision=f"Identified {len(findings)} patterns",
-        reasoning="Based on technical indicators and price action",
-        evidence={"findings": findings},
-        alternatives_considered=["No patterns found"]
     )
     
-    return findings
+    # Compile graph
+    compiled_graph = graph.compile()
+    
+    return compiled_graph, langfuse_handler
+
+# Usage
+graph, langfuse_handler = create_monitored_graph()
+
+# Execute with automatic tracing
+result = graph.invoke(
+    {
+        "ticker": "AAPL",
+        "workflow_id": "wf_001",
+        "iteration_number": 1
+    },
+    config={"callbacks": [langfuse_handler]}
+)
 ```
 
-### Dashboard Metrics
+**That's it!** LangFuse automatically captures:
+- All LLM calls (research agents, strategy dev, quality gate)
+- Nested agent hierarchies (research swarm → subagents → synthesizers → leader)
+- Token usage and costs
+- Latencies and errors
+- Input/output for every step
+
+## Metadata and Tagging
+
+### Add Custom Metadata to Traces
+
+```python
+from langfuse.langchain import CallbackHandler
+
+# Create handler with metadata
+langfuse_handler = CallbackHandler(
+    tags=["production", "algo-trading"],
+    session_id="session_20260118",
+    user_id="user_123",
+    metadata={
+        "ticker": "AAPL",
+        "workflow_id": "wf_001",
+        "iteration": 1,
+        "environment": "production"
+    }
+)
+
+# Execute workflow
+result = graph.invoke(state, config={"callbacks": [langfuse_handler]})
+```
+
+### Tag Individual Agent Calls
+
+```python
+async def research_swarm_node(state: WorkflowState) -> WorkflowState:
+    """Research swarm with custom tagging"""
+    
+    # Create handler for this specific node
+    langfuse_handler = CallbackHandler(
+        tags=["research_swarm", state["ticker"]],
+        metadata={
+            "workflow_id": state["workflow_id"],
+            "iteration": state["iteration_number"],
+            "num_subagents": 15
+        }
+    )
+    
+    # Invoke research leader
+    research_report = await research_leader_agent.invoke(
+        state,
+        config={"callbacks": [langfuse_handler]}
+    )
+    
+    return {"research_report": research_report}
+```
+
+## Monitoring Agent Performance
+
+### View Traces in LangFuse Dashboard
+
+LangFuse automatically provides:
+
+1. **Trace View**: Hierarchical view of all agent calls
+   - Research Swarm
+     - Price Action Analyst
+     - Volume Profile Analyst
+     - ... (all 15 subagents)
+     - Technical Synthesizer
+     - Fundamental Synthesizer
+     - Sentiment Synthesizer
+     - Research Leader
+
+2. **Cost Analytics**: Token usage and cost per agent
+   - Total cost per workflow
+   - Cost breakdown by agent type
+   - Cost trends over time
+
+3. **Performance Metrics**: Latency and throughput
+   - P50, P95, P99 latencies per agent
+   - Success/failure rates
+   - Error analysis
+
+4. **User Feedback**: Manual scoring and annotation
+   - Score strategies (1-5 stars)
+   - Add comments
+   - Flag issues
+
+### Query Metrics Programmatically
+
+```python
+from langfuse import Langfuse
+
+# Initialize client
+langfuse = Langfuse(
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    host=os.getenv("LANGFUSE_BASE_URL")
+)
+
+# Get traces for a specific workflow
+traces = langfuse.get_traces(
+    name="algo_trading_workflow",
+    tags=["AAPL", "production"],
+    from_timestamp=datetime.now() - timedelta(days=7)
+)
+
+# Analyze agent performance
+for trace in traces:
+    print(f"Workflow: {trace.id}")
+    print(f"Duration: {trace.duration}ms")
+    print(f"Cost: ${trace.calculated_total_cost}")
+    print(f"Status: {trace.status}")
+    
+    # Get observations (individual agent calls)
+    for obs in trace.observations:
+        print(f"  Agent: {obs.name}")
+        print(f"  Duration: {obs.duration}ms")
+        print(f"  Tokens: {obs.usage.total}")
+        print(f"  Cost: ${obs.calculated_total_cost}")
+```
+
+## Agent Health Monitoring
+
+### Automatic Error Tracking
+
+LangFuse automatically captures errors:
+
+```python
+# Errors are automatically logged
+try:
+    result = graph.invoke(state, config={"callbacks": [langfuse_handler]})
+except Exception as e:
+    # Error is already in LangFuse with full context
+    logger.error(f"Workflow failed: {e}")
+```
+
+### Custom Health Checks
+
+```python
+class AgentHealthMonitor:
+    """Monitor agent health using LangFuse data"""
+    
+    def __init__(self):
+        self.langfuse = Langfuse()
+    
+    def check_agent_health(self, agent_name: str, time_window_hours: int = 24) -> dict:
+        """Check health of a specific agent"""
+        
+        # Get recent traces for this agent
+        traces = self.langfuse.get_traces(
+            name=agent_name,
+            from_timestamp=datetime.now() - timedelta(hours=time_window_hours)
+        )
+        
+        total = len(traces)
+        if total == 0:
+            return {"status": "no_data", "message": "No recent activity"}
+        
+        # Calculate metrics
+        successful = sum(1 for t in traces if t.status == "success")
+        failed = total - successful
+        success_rate = successful / total
+        
+        avg_duration = sum(t.duration for t in traces) / total
+        avg_cost = sum(t.calculated_total_cost for t in traces) / total
+        
+        # Determine health status
+        if success_rate < 0.5:
+            status = "critical"
+        elif success_rate < 0.9:
+            status = "degraded"
+        else:
+            status = "healthy"
+        
+        return {
+            "status": status,
+            "success_rate": success_rate,
+            "total_invocations": total,
+            "failed_invocations": failed,
+            "avg_duration_ms": avg_duration,
+            "avg_cost_usd": avg_cost
+        }
+    
+    def get_failing_agents(self) -> list:
+        """Get list of agents with health issues"""
+        
+        agent_names = [
+            "price_action_analyst",
+            "volume_profile_analyst",
+            # ... all 23 agents
+        ]
+        
+        failing_agents = []
+        for agent_name in agent_names:
+            health = self.check_agent_health(agent_name)
+            if health["status"] in ["critical", "degraded"]:
+                failing_agents.append({
+                    "agent": agent_name,
+                    "health": health
+                })
+        
+        return failing_agents
+```
+
+## Experiment Tracking
+
+### Track Strategy Experiments
+
+```python
+from langfuse.decorators import observe, langfuse_context
+
+@observe()
+async def run_strategy_experiment(
+    ticker: str,
+    strategy_code: str,
+    parameters: dict
+) -> BacktestMetrics:
+    """Run strategy experiment with LangFuse tracking"""
+    
+    # Add experiment metadata
+    langfuse_context.update_current_trace(
+        name="strategy_experiment",
+        tags=["backtest", ticker],
+        metadata={
+            "ticker": ticker,
+            "strategy_type": parameters.get("type"),
+            "parameters": parameters
+        }
+    )
+    
+    # Run backtest
+    metrics = await backtest_engine.run(strategy_code, ticker, parameters)
+    
+    # Log results as scores
+    langfuse_context.score_current_trace(
+        name="sharpe_ratio",
+        value=metrics.sharpe_ratio
+    )
+    langfuse_context.score_current_trace(
+        name="max_drawdown",
+        value=metrics.max_drawdown
+    )
+    langfuse_context.score_current_trace(
+        name="total_return",
+        value=metrics.total_return
+    )
+    
+    return metrics
+```
+
+### Compare Experiments
+
+```python
+def compare_strategy_variants(ticker: str, experiment_ids: list) -> pd.DataFrame:
+    """Compare multiple strategy variants"""
+    
+    langfuse = Langfuse()
+    
+    results = []
+    for exp_id in experiment_ids:
+        trace = langfuse.get_trace(exp_id)
+        
+        # Extract scores
+        sharpe = next((s.value for s in trace.scores if s.name == "sharpe_ratio"), None)
+        drawdown = next((s.value for s in trace.scores if s.name == "max_drawdown"), None)
+        returns = next((s.value for s in trace.scores if s.name == "total_return"), None)
+        
+        results.append({
+            "experiment_id": exp_id,
+            "sharpe_ratio": sharpe,
+            "max_drawdown": drawdown,
+            "total_return": returns,
+            "cost": trace.calculated_total_cost,
+            "duration": trace.duration
+        })
+    
+    return pd.DataFrame(results)
+```
+
+## Prompt Management
+
+### Version Control for Prompts
+
+```python
+from langfuse import Langfuse
+
+langfuse = Langfuse()
+
+# Create prompt template
+langfuse.create_prompt(
+    name="research_analyst_prompt",
+    prompt="Analyze {ticker} from a {perspective} perspective. Focus on {timeframe} data.",
+    config={
+        "model": "gpt-4o-mini",
+        "temperature": 0.7,
+        "max_tokens": 2000
+    },
+    labels=["research", "technical_analysis"]
+)
+
+# Use prompt in agent
+prompt = langfuse.get_prompt("research_analyst_prompt")
+
+# Compile with variables
+compiled_prompt = prompt.compile(
+    ticker="AAPL",
+    perspective="technical",
+    timeframe="daily"
+)
+
+# Use in LLM call (automatically tracked)
+response = llm.invoke(compiled_prompt, config={"callbacks": [langfuse_handler]})
+```
+
+## Alerting
+
+### Set Up Alerts in LangFuse Dashboard
+
+LangFuse supports alerting based on:
+- Error rate thresholds
+- Latency thresholds
+- Cost thresholds
+- Custom score thresholds
+
+### Custom Alert Logic
+
+```python
+class LangFuseAlertManager:
+    """Custom alerting based on LangFuse data"""
+    
+    def __init__(self):
+        self.langfuse = Langfuse()
+    
+    def check_and_alert(self):
+        """Check metrics and send alerts"""
+        
+        monitor = AgentHealthMonitor()
+        failing_agents = monitor.get_failing_agents()
+        
+        for agent_info in failing_agents:
+            agent = agent_info["agent"]
+            health = agent_info["health"]
+            
+            if health["status"] == "critical":
+                self.send_alert(
+                    severity="critical",
+                    message=f"Agent {agent} is CRITICAL: {health['success_rate']:.1%} success rate",
+                    data=health
+                )
+            elif health["status"] == "degraded":
+                self.send_alert(
+                    severity="warning",
+                    message=f"Agent {agent} is DEGRADED: {health['success_rate']:.1%} success rate",
+                    data=health
+                )
+    
+    def send_alert(self, severity: str, message: str, data: dict):
+        """Send alert via configured channels"""
+        # Integrate with Slack, PagerDuty, etc.
+        logger.warning(f"[{severity.upper()}] {message}")
+        # slack.send_message(channel="#alerts", text=message)
+```
+
+## User Feedback Collection
+
+### Collect Human Feedback on Strategies
+
+```python
+from langfuse import Langfuse
+
+langfuse = Langfuse()
+
+# After strategy is reviewed by human
+def collect_strategy_feedback(
+    trace_id: str,
+    rating: int,  # 1-5
+    comment: str
+):
+    """Collect human feedback on strategy"""
+    
+    langfuse.score(
+        trace_id=trace_id,
+        name="human_rating",
+        value=rating,
+        comment=comment
+    )
+```
+
+### Analyze Feedback
+
+```python
+def analyze_strategy_feedback(ticker: str) -> dict:
+    """Analyze human feedback for strategies"""
+    
+    langfuse = Langfuse()
+    
+    # Get all traces with human ratings
+    traces = langfuse.get_traces(
+        tags=[ticker, "strategy"],
+        has_scores=True
+    )
+    
+    ratings = []
+    for trace in traces:
+        human_rating = next(
+            (s.value for s in trace.scores if s.name == "human_rating"),
+            None
+        )
+        if human_rating:
+            ratings.append(human_rating)
+    
+    if not ratings:
+        return {"message": "No feedback yet"}
+    
+    return {
+        "avg_rating": sum(ratings) / len(ratings),
+        "total_ratings": len(ratings),
+        "rating_distribution": {
+            i: ratings.count(i) for i in range(1, 6)
+        }
+    }
+```
+
+## Self-Hosting LangFuse
+
+For production deployments, self-host LangFuse:
+
+```bash
+# Docker Compose
+docker-compose up -d
+```
+
+`docker-compose.yml`:
 
 ```yaml
-# Grafana dashboard configuration
-dashboards:
-  - name: "Agent Performance Overview"
-    panels:
-      - title: "Agent Invocations (24h)"
-        query: "sum(rate(agent_invocations_total[24h])) by (agent_id)"
-      
-      - title: "Agent Success Rate"
-        query: "sum(rate(agent_invocations_total{status='success'}[1h])) / sum(rate(agent_invocations_total[1h]))"
-      
-      - title: "Agent Latency (P95)"
-        query: "histogram_quantile(0.95, agent_duration_seconds)"
-      
-      - title: "Agent Cost (24h)"
-        query: "sum(increase(agent_cost_usd_total[24h])) by (agent_id)"
-      
-      - title: "Agent Health Status"
-        query: "agent_health_status"
-      
-      - title: "Insight Quality by Agent"
-        query: "avg(agent_insight_quality_score) by (agent_id)"
+version: '3.8'
+
+services:
+  langfuse-server:
+    image: langfuse/langfuse:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/langfuse
+      - NEXTAUTH_SECRET=your-secret-key
+      - NEXTAUTH_URL=http://localhost:3000
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=langfuse
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
 ```
 
-## Monitoring Checklist
+Update `.env`:
+
+```bash
+LANGFUSE_BASE_URL=http://localhost:3000
+```
+
+## Benefits vs. Custom Prometheus/Grafana
+
+| Feature | LangFuse | Custom Prometheus/Grafana |
+|---------|----------|---------------------------|
+| **Setup Time** | 5 minutes | 2-3 days |
+| **LLM-Specific** | ✅ Native | ❌ Generic metrics |
+| **Trace Visualization** | ✅ Built-in | ❌ Need custom UI |
+| **Cost Tracking** | ✅ Automatic | ❌ Manual calculation |
+| **Prompt Management** | ✅ Built-in | ❌ Not supported |
+| **User Feedback** | ✅ Built-in | ❌ Need custom solution |
+| **Nested Traces** | ✅ Automatic | ❌ Complex to implement |
+| **Maintenance** | ✅ Low | ❌ High |
+
+## Implementation Checklist
 
 ### Must Have (Phase 2)
-- [ ] Implement `AgentMonitor` singleton
-- [ ] Add `@monitor_agent` decorator to all agents
-- [ ] Set up Prometheus metrics collection
-- [ ] Implement JSONL event logging
-- [ ] Create basic health check endpoint
+- [ ] Install LangFuse SDK
+- [ ] Set up LangFuse account (cloud or self-hosted)
+- [ ] Add `CallbackHandler` to LangGraph workflow
+- [ ] Configure environment variables
+- [ ] Test trace capture for one workflow
 
 ### Should Have (Phase 3)
-- [ ] Implement `AgentPerformanceAnalyzer`
-- [ ] Set up Grafana dashboards
-- [ ] Implement alert manager
-- [ ] Add decision logging for explainability
-- [ ] Calculate insight quality scores
+- [ ] Add custom metadata and tags
+- [ ] Implement health monitoring
+- [ ] Set up alerting
+- [ ] Create prompt templates
+- [ ] Implement user feedback collection
 
 ### Nice to Have (Phase 4)
-- [ ] Implement A/B testing framework
-- [ ] Add human feedback collection
-- [ ] Create explainability UI
-- [ ] Implement automated performance regression detection
+- [ ] Self-host LangFuse
+- [ ] Create custom dashboards
+- [ ] Integrate with Slack/PagerDuty
+- [ ] Implement A/B testing with LangFuse datasets
 
 ## Success Metrics
 
-1. **Coverage**: 100% of agents instrumented with monitoring
-2. **Latency Overhead**: < 5ms per agent invocation
-3. **Storage**: < 100MB per day of metrics data
-4. **Alert Accuracy**: < 5% false positive rate
-5. **Explainability**: 100% of decisions logged with reasoning
+1. **Coverage**: 100% of LLM calls traced
+2. **Overhead**: < 10ms latency per trace
+3. **Visibility**: All 23 agents visible in dashboard
+4. **Cost Tracking**: 100% accurate cost attribution
+5. **Alerting**: < 5 minute time-to-alert for failures
 
 ---
 
-**Document**: Agent Monitoring & Evaluation Framework  
+**Document**: Agent Monitoring with LangFuse  
 **Created**: 2026-01-18  
-**Status**: Design Complete
+**Status**: Design Complete  
+**Replaces**: AGENT_MONITORING.md (Prometheus/Grafana approach)
