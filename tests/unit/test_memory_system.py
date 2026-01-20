@@ -9,6 +9,7 @@ from src.memory.collection_wrappers.strategy_library import StrategyLibraryColle
 from src.memory.collection_wrappers.lessons_learned import LessonsLearnedCollection
 from src.memory.collection_wrappers.market_regimes import MarketRegimesCollection
 from src.memory.archive_manager import ArchiveManager
+from src.memory.lineage_tracker import LineageTracker
 from pydantic import ValidationError
 
 @pytest.fixture
@@ -223,3 +224,25 @@ def test_archive_manager(memory_manager, tmp_path):
     assert restored_count == 1
     assert collection.count() == 2
     assert collection.exists("old_doc")
+
+def test_lineage_tracker(tmp_path):
+    """Test LineageTracker operations."""
+    persist_path = tmp_path / "lineage_graph.json"
+    tracker = LineageTracker(persist_path=str(persist_path))
+    
+    # Add nodes
+    tracker.add_node("finding_1", "research_finding", "research_findings")
+    tracker.add_node("strategy_1", "strategy", "strategy_library")
+    
+    # Add edge
+    tracker.add_edge("finding_1", "strategy_1", "derived_from")
+    
+    # Verify lineage
+    lineage = tracker.get_lineage("strategy_1")
+    assert lineage["node_id"] == "strategy_1"
+    assert len(lineage["ancestors"]) == 1
+    assert lineage["ancestors"][0]["node_id"] == "finding_1"
+    
+    # Test circular dependency prevention
+    with pytest.raises(ValueError, match="would create a cycle"):
+        tracker.add_edge("strategy_1", "finding_1", "refined_from")
