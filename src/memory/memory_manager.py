@@ -43,14 +43,22 @@ class MemoryManager:
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
         
-        # Initialize ChromaDB client with persistent storage
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
+        # Initialize ChromaDB client
+        if str(persist_directory) == ":memory:":
+            self.client = chromadb.EphemeralClient(
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
             )
-        )
+        else:
+            self.client = chromadb.PersistentClient(
+                path=str(self.persist_directory),
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
+            )
         
         if reset:
             logger.warning("Resetting ChromaDB - all data will be deleted")

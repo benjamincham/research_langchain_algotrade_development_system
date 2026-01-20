@@ -113,10 +113,18 @@ class StrategyLibraryCollection(BaseCollection):
         # So we get all and filter in Python
         all_strategies = self.get_all()
         
-        top_performers = [
-            s for s in all_strategies 
-            if s['metadata'].get('performance_metrics', {}).get('sharpe_ratio', 0) >= min_sharpe
-        ]
+        import json
+        top_performers = []
+        for s in all_strategies:
+            metrics = s['metadata'].get('performance_metrics', {})
+            if isinstance(metrics, str):
+                metrics = json.loads(metrics)
+            
+            sharpe = metrics.get('sharpe_ratio', 0)
+            if sharpe >= min_sharpe:
+                # Ensure metrics are deserialized in the returned object
+                s['metadata']['performance_metrics'] = metrics
+                top_performers.append(s)
         
         # Sort by Sharpe ratio descending
         top_performers.sort(
@@ -145,10 +153,17 @@ class StrategyLibraryCollection(BaseCollection):
         # ChromaDB doesn't support array contains, so we get all and filter
         all_strategies = self.get_all()
         
-        ticker_strategies = [
-            s for s in all_strategies 
-            if ticker in s['metadata'].get('tickers', [])
-        ]
+        import json
+        ticker_strategies = []
+        for s in all_strategies:
+            tickers = s['metadata'].get('tickers', [])
+            if isinstance(tickers, str):
+                tickers = json.loads(tickers)
+            
+            if ticker in tickers:
+                # Ensure tickers are deserialized in the returned object
+                s['metadata']['tickers'] = tickers
+                ticker_strategies.append(s)
         
         return ticker_strategies[:limit]
     

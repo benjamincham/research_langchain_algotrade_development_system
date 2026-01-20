@@ -117,10 +117,16 @@ class ResearchFindingsCollection(BaseCollection):
         # So we get all and filter in Python
         all_findings = self.get_all()
         
-        high_conf_findings = [
-            f for f in all_findings 
-            if f['metadata'].get('confidence', 0) >= min_confidence
-        ]
+        high_conf_findings = []
+        for f in all_findings:
+            confidence = f['metadata'].get('confidence', 0)
+            if isinstance(confidence, str):
+                try:
+                    confidence = float(confidence)
+                except ValueError:
+                    confidence = 0
+            if confidence >= min_confidence:
+                high_conf_findings.append(f)
         
         return high_conf_findings[:limit]
     

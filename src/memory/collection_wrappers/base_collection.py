@@ -11,6 +11,7 @@ Task: 2.3.1 - BaseCollection
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
+import json
 from pydantic import BaseModel, ValidationError
 from chromadb import Collection
 from loguru import logger
@@ -79,10 +80,20 @@ class BaseCollection(ABC):
             validated = schema(**metadata)
             
             # Add to ChromaDB
+            # ChromaDB only supports str, int, float, bool for metadata values
+            # We need to serialize lists and dicts to JSON strings
+            metadata_dump = validated.model_dump()
+            processed_metadata = {}
+            for k, v in metadata_dump.items():
+                if isinstance(v, (list, dict)):
+                    processed_metadata[k] = json.dumps(v)
+                else:
+                    processed_metadata[k] = v
+
             self.collection.add(
                 ids=[doc_id],
                 documents=[content],
-                metadatas=[validated.model_dump()]
+                metadatas=[processed_metadata]
             )
             
             logger.debug(f"Added document '{doc_id}' to {self.collection_name}")
@@ -109,10 +120,26 @@ class BaseCollection(ABC):
             result = self.collection.get(ids=[doc_id])
             
             if result['ids']:
+                metadata = result['metadatas'][0]
+                # Deserialize JSON strings back to lists/dicts
+                processed_metadata = {}
+                for k, v in metadata.items():
+                    if isinstance(v, str):
+                        try:
+                            # Try to parse as JSON if it looks like a list or dict
+                            if (v.startswith('[') and v.endswith(']')) or (v.startswith('{') and v.endswith('}')):
+                                processed_metadata[k] = json.loads(v)
+                            else:
+                                processed_metadata[k] = v
+                        except (json.JSONDecodeError, TypeError):
+                            processed_metadata[k] = v
+                    else:
+                        processed_metadata[k] = v
+
                 return {
                     'id': result['ids'][0],
                     'document': result['documents'][0],
-                    'metadata': result['metadatas'][0]
+                    'metadata': processed_metadata
                 }
             
             logger.debug(f"Document '{doc_id}' not found in {self.collection_name}")
@@ -150,10 +177,24 @@ class BaseCollection(ABC):
             documents = []
             if results['ids'] and results['ids'][0]:
                 for i in range(len(results['ids'][0])):
+                    metadata = results['metadatas'][0][i]
+                    processed_metadata = {}
+                    for k, v in metadata.items():
+                        if isinstance(v, str):
+                            try:
+                                if (v.startswith('[') and v.endswith(']')) or (v.startswith('{') and v.endswith('}')):
+                                    processed_metadata[k] = json.loads(v)
+                                else:
+                                    processed_metadata[k] = v
+                            except (json.JSONDecodeError, TypeError):
+                                processed_metadata[k] = v
+                        else:
+                            processed_metadata[k] = v
+
                     documents.append({
                         'id': results['ids'][0][i],
                         'document': results['documents'][0][i],
-                        'metadata': results['metadatas'][0][i],
+                        'metadata': processed_metadata,
                         'distance': results['distances'][0][i]
                     })
             
@@ -191,10 +232,33 @@ class BaseCollection(ABC):
                 update_kwargs['documents'] = [content]
             
             if metadata is not None:
-                # Validate metadata
+                # Get current metadata to support partial updates
+                current = self.get(doc_id)
+                if current:
+                    # Merge current metadata with new metadata
+                    # Need to deserialize current metadata first
+                    current_meta = current['metadata']
+                    for k, v in current_meta.items():
+                        if isinstance(v, str):
+                            try:
+                                current_meta[k] = json.loads(v)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    
+                    merged_metadata = {**current_meta, **metadata}
+                else:
+                    merged_metadata = metadata
+
+                # Validate merged metadata
                 schema = self.get_schema()
-                validated = schema(**metadata)
-                update_kwargs['metadatas'] = [validated.model_dump()]
+                validated = schema(**merged_metadata).model_dump()
+                processed = {}
+                for k, v in validated.items():
+                    if isinstance(v, (list, dict)):
+                        processed[k] = json.dumps(v)
+                    else:
+                        processed[k] = v
+                update_kwargs['metadatas'] = [processed]
             
             self.collection.update(**update_kwargs)
             logger.debug(f"Updated document '{doc_id}' in {self.collection_name}")
@@ -278,16 +342,22 @@ class BaseCollection(ABC):
             
             # Validate all metadata
             schema = self.get_schema()
-            validated_metadatas = [
-                schema(**meta).model_dump()
-                for meta in metadatas
-            ]
+            processed_metadatas = []
+            for meta in metadatas:
+                validated = schema(**meta).model_dump()
+                processed = {}
+                for k, v in validated.items():
+                    if isinstance(v, (list, dict)):
+                        processed[k] = json.dumps(v)
+                    else:
+                        processed[k] = v
+                processed_metadatas.append(processed)
             
             # Add to ChromaDB
             self.collection.add(
                 ids=ids,
                 documents=contents,
-                metadatas=validated_metadatas
+                metadatas=processed_metadatas
             )
             
             logger.info(f"Batch added {len(documents)} documents to {self.collection_name}")
@@ -316,10 +386,24 @@ class BaseCollection(ABC):
             documents = []
             if result['ids']:
                 for i in range(len(result['ids'])):
+                    metadata = result['metadatas'][i]
+                    processed_metadata = {}
+                    for k, v in metadata.items():
+                        if isinstance(v, str):
+                            try:
+                                if (v.startswith('[') and v.endswith(']')) or (v.startswith('{') and v.endswith('}')):
+                                    processed_metadata[k] = json.loads(v)
+                                else:
+                                    processed_metadata[k] = v
+                            except (json.JSONDecodeError, TypeError):
+                                processed_metadata[k] = v
+                        else:
+                            processed_metadata[k] = v
+
                     documents.append({
                         'id': result['ids'][i],
                         'document': result['documents'][i],
-                        'metadata': result['metadatas'][i]
+                        'metadata': processed_metadata
                     })
             
             logger.debug(f"Retrieved {len(documents)} documents from {self.collection_name}")
@@ -353,10 +437,24 @@ class BaseCollection(ABC):
             documents = []
             if result['ids']:
                 for i in range(len(result['ids'])):
+                    metadata = result['metadatas'][i]
+                    processed_metadata = {}
+                    for k, v in metadata.items():
+                        if isinstance(v, str):
+                            try:
+                                if (v.startswith('[') and v.endswith(']')) or (v.startswith('{') and v.endswith('}')):
+                                    processed_metadata[k] = json.loads(v)
+                                else:
+                                    processed_metadata[k] = v
+                            except (json.JSONDecodeError, TypeError):
+                                processed_metadata[k] = v
+                        else:
+                            processed_metadata[k] = v
+
                     documents.append({
                         'id': result['ids'][i],
                         'document': result['documents'][i],
-                        'metadata': result['metadatas'][i]
+                        'metadata': processed_metadata
                     })
             
             logger.debug(f"Retrieved {len(documents)} documents from {self.collection_name} with filter")
