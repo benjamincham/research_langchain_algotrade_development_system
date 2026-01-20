@@ -233,3 +233,22 @@ def create_powerful_llm(
         temperature=temperature,
         max_tokens=max_tokens
     )
+
+
+def get_default_llm(temperature: float = 0.7) -> BaseChatModel:
+    """
+    Get the default LLM instance for the system.
+    
+    Tries to create a powerful LLM first, then falls back to a cheap one.
+    
+    Args:
+        temperature: Temperature for generation
+        
+    Returns:
+        BaseChatModel instance
+    """
+    try:
+        return create_powerful_llm(temperature=temperature)
+    except Exception as e:
+        logger.warning(f"Failed to create powerful LLM, falling back to cheap: {e}")
+        return create_cheap_llm(temperature=temperature)
