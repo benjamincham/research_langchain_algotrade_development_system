@@ -47,9 +47,22 @@ class ResearchSubAgent(BaseAgent):
             
         logger.info(f"[{self.name}] Starting task: {task_description} for {ticker} ({timeframe})")
         
-        # Step 1: Perform research (LLM call)
+        # Step 1: Perform research (LLM call with tool-use capability)
         research_prompt = self._generate_research_prompt(ticker, timeframe, task_description, focus_area)
-        raw_finding = await self._call_llm(research_prompt)
+        
+        # Get all registered tools from the registry
+        tools = self.tool_registry.get_all_tools() if self.tool_registry else []
+        
+        # First LLM call to decide on tool use
+        raw_finding = await self._call_llm(research_prompt, tools=tools)
+        
+        # Check for tool calls and execute them
+        # NOTE: This is a simplified tool-use loop. A full implementation would require
+        # parsing the LLM response for tool calls, executing them, and feeding the
+        # results back to the LLM in a loop. For this phase, we'll assume the LLM
+        # returns the final finding after considering the available tools.
+        # The actual tool-use loop will be implemented in a later phase or a more
+        # specialized agent. For now, we'll focus on making the tools available.
         
         # Step 2: Parse and validate finding
         finding_data = self._parse_finding(raw_finding, ticker, timeframe, focus_area)
