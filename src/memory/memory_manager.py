@@ -108,6 +108,27 @@ class MemoryManager:
         )
         
         logger.info("All collections initialized successfully")
+
+    def get_collection(self, name: str):
+        """
+        Get a specific collection object by name.
+        
+        Args:
+            name: Name of the collection (e.g., "research_findings")
+            
+        Returns:
+            ChromaDB Collection object
+        """
+        if name == "research_findings":
+            return self.research_findings
+        elif name == "strategy_library":
+            return self.strategy_library
+        elif name == "lessons_learned":
+            return self.lessons_learned
+        elif name == "market_regimes":
+            return self.market_regimes
+        else:
+            raise ValueError(f"Unknown collection name: {name}")
     
     def get_collection_stats(self) -> Dict[str, int]:
         """
