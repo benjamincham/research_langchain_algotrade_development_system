@@ -12,7 +12,7 @@ class MockAgent(BaseAgent):
 @pytest.mark.asyncio
 async def test_base_agent_initialization():
     """Test that BaseAgent initializes correctly."""
-    mock_llm = MagicMock()
+    mock_llm = AsyncMock()
     agent = MockAgent(name="TestAgent", role="Tester", llm=mock_llm)
     assert agent.name == "TestAgent"
     assert agent.role == "Tester"
@@ -22,7 +22,7 @@ async def test_base_agent_initialization():
 @pytest.mark.asyncio
 async def test_base_agent_call_llm():
     """Test that _call_llm correctly interacts with the LLM."""
-    mock_llm = MagicMock()
+    mock_llm = AsyncMock()
     mock_response = MagicMock()
     mock_response.content = "Mocked LLM Response"
     mock_llm.ainvoke = AsyncMock(return_value=mock_response)
@@ -38,7 +38,7 @@ from src.agents.research_agent import ResearchAgent
 @pytest.mark.asyncio
 async def test_research_agent_initialization():
     """Test that ResearchAgent initializes correctly."""
-    mock_llm = MagicMock()
+    mock_llm = AsyncMock()
     agent = ResearchAgent(llm=mock_llm)
     assert agent.name == "ResearchLeader"
     assert "Research Leader" in agent.role
@@ -48,8 +48,11 @@ async def test_research_agent_initialization():
 @pytest.mark.asyncio
 async def test_research_agent_run_basic():
     """Test basic run method of ResearchAgent."""
-    mock_llm = MagicMock()
+    mock_llm = AsyncMock()
     agent = ResearchAgent(llm=mock_llm)
+    mock_llm.ainvoke.return_value = MagicMock(content='{"ticker": "AAPL", "timeframe": "1d", "subtasks": []}')
     result = await agent.run({"objective": "Analyze AAPL momentum"})
     assert result["objective"] == "Analyze AAPL momentum"
-    assert result["status"] == "initialized"
+    assert result["status"] == "strategy_developed"
+    assert "strategy" in result
+    assert result["strategy"]["ticker"] == "AAPL"
