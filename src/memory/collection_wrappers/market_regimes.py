@@ -148,10 +148,16 @@ class MarketRegimesCollection(BaseCollection):
         # So we get all and filter in Python
         all_regimes = self.get_all()
         
-        high_vol_regimes = [
-            r for r in all_regimes 
-            if r['metadata'].get('volatility', 0) >= min_volatility
-        ]
+        high_vol_regimes = []
+        for r in all_regimes:
+            vol = r['metadata'].get('volatility', 0)
+            if isinstance(vol, str):
+                try:
+                    vol = float(vol)
+                except ValueError:
+                    vol = 0
+            if vol >= min_volatility:
+                high_vol_regimes.append(r)
         
         # Sort by volatility descending
         high_vol_regimes.sort(

@@ -6,6 +6,9 @@ from datetime import datetime
 from src.memory.memory_manager import MemoryManager
 from src.memory.collection_wrappers.research_findings import ResearchFindingsCollection, ResearchFindingMetadata
 from src.memory.collection_wrappers.strategy_library import StrategyLibraryCollection, StrategyMetadata, PerformanceMetrics
+from src.memory.collection_wrappers.lessons_learned import LessonsLearnedCollection
+from src.memory.collection_wrappers.market_regimes import MarketRegimesCollection
+from src.memory.archive_manager import ArchiveManager
 from pydantic import ValidationError
 
 @pytest.fixture
@@ -119,3 +122,104 @@ def test_strategy_library_collection(memory_manager):
     
     updated = collection.get(strategy_id)
     assert updated["metadata"]["performance_metrics"]["sharpe_ratio"] == 2.2
+
+def test_lessons_learned_collection(memory_manager):
+    """Test LessonsLearnedCollection operations."""
+    collection = LessonsLearnedCollection(memory_manager.lessons_learned)
+    
+    lesson_id = "test_lesson_001"
+    content = "Over-reliance on RSI led to false signals in low volatility"
+    metadata = {
+        "type": "failure",
+        "severity": "medium",
+        "context": "momentum_strategy_v1",
+        "timestamp": datetime.now().isoformat(),
+        "tags": ["rsi", "volatility"]
+    }
+    
+    # Test add
+    assert collection.add(lesson_id, content, metadata) is True
+    
+    # Test get_failures
+    failures = collection.get_failures()
+    assert len(failures) > 0
+    assert failures[0]["id"] == lesson_id
+
+def test_market_regimes_collection(memory_manager):
+    """Test MarketRegimesCollection operations."""
+    collection = MarketRegimesCollection(memory_manager.market_regimes)
+    
+    regime_id = "test_regime_001"
+    description = "Bull market with low volatility"
+    metadata = {
+        "regime_type": "bull_low_vol",
+        "start_date": "2024-01-01",
+        "end_date": "",
+        "volatility": 0.12,
+        "indicators": {"vix": 15.5, "sma_200": 4500.0}
+    }
+    
+    # Test add
+    assert collection.add(regime_id, description, metadata) is True
+    
+    # Test get_current_regime
+    current = collection.get_current_regime()
+    assert current is not None
+    assert current["id"] == regime_id
+    assert current["metadata"]["regime_type"] == "bull_low_vol"
+
+def test_archive_manager(memory_manager, tmp_path):
+    """Test ArchiveManager operations."""
+    archive_dir = tmp_path / "archives"
+    archive_manager = ArchiveManager(archive_dir=str(archive_dir))
+    
+    collection = ResearchFindingsCollection(memory_manager.research_findings)
+    collection.clear()
+    
+    # Add an old document (100 days ago)
+    from datetime import timedelta
+    old_date = (datetime.now() - timedelta(days=100)).isoformat()
+    
+    collection.add(
+        "old_doc", 
+        "Old finding", 
+        {
+            "ticker": "AAPL", "type": "technical", "confidence": 0.5, 
+            "agent_id": "agent", "timestamp": old_date, "source": "src", 
+            "timeframe": "1D", "tags": []
+        }
+    )
+    
+    # Add a new document
+    new_date = datetime.now().isoformat()
+    collection.add(
+        "new_doc", 
+        "New finding", 
+        {
+            "ticker": "AAPL", "type": "technical", "confidence": 0.9, 
+            "agent_id": "agent", "timestamp": new_date, "source": "src", 
+            "timeframe": "1D", "tags": []
+        }
+    )
+    
+    assert collection.count() == 2
+    
+    # Archive documents older than 90 days
+    result = archive_manager.archive_collection(
+        collection=memory_manager.research_findings,
+        older_than_days=90
+    )
+    
+    assert result["archived_count"] == 1
+    assert collection.count() == 1
+    assert Path(result["archive_path"]).exists()
+    
+    # Restore from archive
+    restored_count = archive_manager.restore_archive(
+        archive_path=result["archive_path"],
+        collection=memory_manager.research_findings
+    )
+    
+    assert restored_count == 1
+    assert collection.count() == 2
+    assert collection.exists("old_doc")
