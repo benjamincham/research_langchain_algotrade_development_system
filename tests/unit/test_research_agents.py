@@ -53,6 +53,7 @@ async def test_research_agent_run_basic():
     mock_llm.ainvoke.return_value = MagicMock(content='{"ticker": "AAPL", "timeframe": "1d", "subtasks": []}')
     result = await agent.run({"objective": "Analyze AAPL momentum"})
     assert result["objective"] == "Analyze AAPL momentum"
-    assert result["status"] == "strategy_developed"
+    assert result["status"] == "research_complete"
     assert "strategy" in result
+    assert "final_synthesis" in result
     assert result["strategy"]["ticker"] == "AAPL"

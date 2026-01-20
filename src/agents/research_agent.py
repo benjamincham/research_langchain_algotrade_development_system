@@ -2,6 +2,9 @@ from typing import Dict, Any, List, Optional
 from src.core.base_agent import BaseAgent
 from src.core.logging import logger
 from src.memory.memory_manager import MemoryManager
+from src.agents.research.subagents import TechnicalAnalysisSubAgent, FundamentalAnalysisSubAgent, SentimentAnalysisSubAgent, PatternMiningSubAgent, MarketResearchSubAgent
+from src.agents.research.domain_synthesizers import TechnicalSynthesizer, FundamentalSynthesizer, SentimentSynthesizer
+import asyncio
 import json
 
 class ResearchAgent(BaseAgent):
@@ -30,7 +33,8 @@ class ResearchAgent(BaseAgent):
         """
         super().__init__(name=name, role="Research Leader", llm=llm, system_prompt=system_prompt)
         self.memory_manager = memory_manager
-        self.subagents = {}
+        self.subagents = self._initialize_subagents()
+        self.synthesizers = self._initialize_synthesizers()
 
     async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -54,16 +58,19 @@ class ResearchAgent(BaseAgent):
         strategy = self._parse_strategy(strategy_response, objective)
         logger.info(f"Research strategy developed: {strategy}")
         
-        # Step 2: Spawn subagents and execute (to be implemented)
+        # Step 2: Spawn subagents and execute
+        raw_findings = await self._execute_subtasks(strategy)
         
-        # Step 3: Synthesize results (to be implemented)
+        # Step 3: Synthesize results
+        final_synthesis = await self._synthesize_results(strategy, raw_findings)
         
-        # For now, return the developed strategy
+        # Step 4: Return final synthesis
         return {
             "objective": objective,
-            "status": "strategy_developed",
+            "status": "research_complete",
             "strategy": strategy,
-            "message": "Research strategy developed and ready for subagent execution"
+            "final_synthesis": final_synthesis,
+            "message": "Research completed and final synthesis generated"
         }
 
     def _generate_strategy_prompt(self, objective: str) -> str:
@@ -89,6 +96,107 @@ class ResearchAgent(BaseAgent):
         Ensure the subtasks cover technical, fundamental, and sentiment aspects where relevant.
         The final output MUST be only the JSON object.
         """
+
+    def _initialize_subagents(self) -> Dict[str, BaseAgent]:
+        """Initializes all specialized subagents."""
+        return {
+            "technical_analysis": TechnicalAnalysisSubAgent(llm=self.llm, memory_manager=self.memory_manager),
+            "fundamental_analysis": FundamentalAnalysisSubAgent(llm=self.llm, memory_manager=self.memory_manager),
+            "sentiment_analysis": SentimentAnalysisSubAgent(llm=self.llm, memory_manager=self.memory_manager),
+            "pattern_mining": PatternMiningSubAgent(llm=self.llm, memory_manager=self.memory_manager),
+            "market_research": MarketResearchSubAgent(llm=self.llm, memory_manager=self.memory_manager),
+        }
+
+    def _initialize_synthesizers(self) -> Dict[str, BaseAgent]:
+        """Initializes all domain synthesizers."""
+        return {
+            "technical": TechnicalSynthesizer(llm=self.llm, memory_manager=self.memory_manager),
+            "fundamental": FundamentalSynthesizer(llm=self.llm, memory_manager=self.memory_manager),
+            "sentiment": SentimentSynthesizer(llm=self.llm, memory_manager=self.memory_manager),
+        }
+
+    async def _execute_subtasks(self, strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Executes subtasks in parallel using the appropriate subagents."""
+        tasks = []
+        raw_findings = []
+        
+        for subtask in strategy.get("subtasks", []):
+            agent_type = subtask.get("agent_type")
+            if agent_type in self.subagents:
+                agent = self.subagents[agent_type]
+                task_input = {
+                    "ticker": strategy["ticker"],
+                    "timeframe": strategy["timeframe"],
+                    "task_description": subtask["task_description"],
+                    "focus_area": subtask["focus_area"]
+                }
+                tasks.append(agent.run(task_input))
+            else:
+                logger.warning(f"Unknown agent type in strategy: {agent_type}")
+
+        # Execute all tasks concurrently
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Subagent task failed: {result}")
+                # Handle error finding (e.g., create a low-confidence error finding)
+            else:
+                raw_findings.append(result)
+                
+        return raw_findings
+
+    async def _synthesize_results(self, strategy: Dict[str, Any], raw_findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Synthesizes raw findings using domain synthesizers and the leader agent."""
+        
+        # Group findings by domain
+        grouped_findings = {
+            "technical": [],
+            "fundamental": [],
+            "sentiment": [],
+            "market": [],
+            "pattern": [],
+        }
+        for finding in raw_findings:
+            finding_type = finding["metadata"]["type"]
+            if finding_type in grouped_findings:
+                grouped_findings[finding_type].append(finding)
+            else:
+                logger.warning(f"Finding with unknown type: {finding_type}")
+
+        # Execute domain synthesizers concurrently
+        synthesis_tasks = []
+        domain_syntheses = []
+        
+        for domain, synthesizer in self.synthesizers.items():
+            if grouped_findings.get(domain):
+                synthesis_input = {
+                    "objective": strategy["objective"],
+                    "ticker": strategy["ticker"],
+                    "timeframe": strategy["timeframe"],
+                    "raw_findings": grouped_findings[domain]
+                }
+                synthesis_tasks.append(synthesizer.run(synthesis_input))
+
+        domain_syntheses_results = await asyncio.gather(*synthesis_tasks, return_exceptions=True)
+        
+        for result in domain_syntheses_results:
+            if isinstance(result, Exception):
+                logger.error(f"Domain synthesis failed: {result}")
+            else:
+                domain_syntheses.append(result)
+
+        # Final synthesis by the Research Leader (to be implemented)
+        # For now, return a placeholder combining all results
+        
+        final_synthesis = {
+            "leader_synthesis": "Final synthesis by Research Leader (Not yet implemented)",
+            "domain_syntheses": domain_syntheses,
+            "raw_findings": raw_findings,
+            "status": "partial_synthesis"
+        }
+        
+        return final_synthesis
 
     def _parse_strategy(self, strategy_response: str, objective: str) -> Dict[str, Any]:
         """Parses the LLM's strategy response (JSON string) into a dictionary."""
